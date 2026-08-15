@@ -127,7 +127,7 @@ def basis(X, recs, field, keep=None):
     """Orthonormal basis for the span of the level means."""
     _, M = means_matrix(X, recs, field)
     U, s, _ = np.linalg.svd(M.T, full_matrices=False)
-    k = keep if keep else int((s > 1e-8).sum())
+    k = keep if keep is not None else int((s > 1e-8).sum())
     return U[:, :k]
 
 
