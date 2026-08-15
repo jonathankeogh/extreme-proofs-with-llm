@@ -1,3 +1,6 @@
 .env
 .env.*
 secrets.env
+proofs_sonnet5.jsonl
+proofs.backup.jsonl
+.batch_meta.json
