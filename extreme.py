@@ -92,8 +92,11 @@ def main():
                             cv=5).mean()
         print(f"  language probe, {name:<8} {a:.3f}   (chance "
               f"{1/len(set(yl)):.3f})")
-    print("  -> centred still high: the offset did not transfer. Stop, and")
-    print("     re-estimate the means on the pooled corpus instead.")
+    if a > 2 / len(set(yl)):
+        print("  -> centred still high: the offset did not transfer. Stop,")
+        print("     and re-estimate the means on the pooled corpus instead.")
+    else:
+        print("  -> offset transferred; language is removed out of sample.")
 
     # ---------------------------------------------------------------- 1
     rule("1. Technique centroids, built on the technique arm")

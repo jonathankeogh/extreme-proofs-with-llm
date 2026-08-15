@@ -49,18 +49,30 @@ immutable; version it rather than mutating it.
 cause was a prompt clause asking the model to "make that extension visible"
 — a deliverable beyond the proof. Diagnosed from the prompt text before
 reading any output, clause removed, cap raised, those 30 records
-regenerated. Details in the write-up.
+regenerated. `proofs.pre-generality-fix.jsonl` is the pre-fix corpus, kept
+so the change is auditable. Details in the write-up.
 
 ## Layout
 
 ```
-generate.py          batch generation, resume-by-diff against proofs.jsonl
-pilot/embed.py       embed with bge-m3, cache to embeddings.npy, first-pass probes
-pilot/probes.py      structural probes: spectra, angles + nulls, centroids,
-                     hard probes, lexical baseline
-pilot/extreme.py     stage 3: classify the extreme arm against technique centroids
-proofs.jsonl         the corpus
-embeddings.npy       cached embeddings (450 × 1024), regenerable
+generate.py        batch generation against the Message Batches API,
+                   resume-by-diff: only submits grid cells missing from
+                   proofs.jsonl
+first_pass.py      embed with bge-m3, cache to embeddings.npy, first-pass
+                   probes and UMAP figures
+slice.py           style-sliced scoring, within-language technique scores,
+                   cross-lingual transfer, extremal point ranking
+analyse.py         clustering and probe scoring on the cached embeddings
+probes.py          structural probes: language/style/technique spectra,
+                   subspace angles + nulls, centroid agreement, hard probes,
+                   lexical baseline
+extreme.py         stage 3: classify the extreme arm against the technique
+                   centroids; out-of-set threshold; direction × technique
+
+proofs.jsonl       the corpus, 450 records
+embeddings.npy     cached bge-m3 embeddings (450 × 1024), regenerable
+pilot_umap_raw.png
+pilot_umap_centred.png
 ```
 
 ## Running it
@@ -69,14 +81,14 @@ embeddings.npy       cached embeddings (450 × 1024), regenerable
 uv sync
 
 export ANTHROPIC_API_KEY=...
-uv run generate.py          # only if regenerating the corpus; a few dollars
-uv run pilot/embed.py       # downloads bge-m3 (~2GB), caches embeddings
-uv run pilot/probes.py      # instrument validation, seconds
-uv run pilot/extreme.py     # the extreme-arm analysis, seconds
+uv run generate.py        # only if regenerating the corpus; a few dollars
+uv run first_pass.py      # downloads bge-m3 (~2GB), caches embeddings
+uv run probes.py          # instrument validation, seconds
+uv run extreme.py         # the extreme-arm analysis, seconds
 ```
 
-`probes.py` and `extreme.py` read the cached embeddings and make no API
-calls — rerun them freely. Everything runs on a laptop; no GPU needed.
+Everything after `generate.py` reads the cached embeddings and makes no API
+calls — rerun freely. Runs on a laptop; no GPU needed.
 
 ## What's actually in the analysis
 
@@ -109,6 +121,12 @@ only `machinery` does; the rest are out-of-*register*, not out-of-set.
 
 The nulls and baselines are the point. `angle_null` and `lexical_baseline`
 in `probes.py` each take about ten seconds and each killed a headline.
+
+**Known failing check.** `extreme.py` section 0 tests whether language means
+estimated on the technique arm remove language from the extreme arm. They do
+not — the probe sits at 0.487 against chance 0.167. The extreme-arm result
+therefore rests on the mapping being identical across all six languages,
+not on clean out-of-sample language removal.
 
 ## Caveats
 
