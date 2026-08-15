@@ -431,6 +431,73 @@ def lexical_baseline(X, recs, lang="en", seed=0):
     print("  -> tfidf near the embedding: technique is lexical here.")
 
 
+# ---------------------------------------------------------------- 10
+
+def style_slices(X, recs):
+    """
+    Does technique structure depend on style? Notation is shared across all
+    six languages and is technique-specific; prose is neither. So terse
+    proofs should carry more technique signal and less language signal than
+    verbose ones. Predicted before the corpus was generated.
+    """
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import normalized_mutual_info_score
+
+    print(f"  {'slice':<10}{'technique NMI':>15}{'technique probe':>17}"
+          f"{'language probe':>16}")
+    out = {}
+    for style in sorted({r["style"] for r in recs}):
+        i = [j for j, r in enumerate(recs) if r["style"] == style]
+        row = []
+        for f in ("technique", "language"):
+            y = LabelEncoder().fit_transform([recs[j][f] for j in i])
+            k = len(set(y))
+            acc = cross_val_score(LogisticRegression(max_iter=3000),
+                                  X[i], y, cv=5).mean()
+            if f == "technique":
+                km = KMeans(n_clusters=k, n_init=10, random_state=0).fit(X[i])
+                nmi = normalized_mutual_info_score(y, km.labels_)
+                out[style] = nmi
+                row += [nmi, acc]
+            else:
+                row.append(acc)
+        print(f"  {style:<10}{row[0]:>15.3f}{row[1]:>17.3f}{row[2]:>16.3f}")
+    if len(out) == 2:
+        t, v = out.get("terse"), out.get("verbose")
+        print(f"\n  technique NMI difference (terse - verbose): {t - v:+.3f}")
+        print("  -> positive: notation carries the mathematics, prose the "
+              "language.")
+
+
+# ---------------------------------------------------------------- 11
+
+def cross_lingual_transfer(X, recs, train_lang="en"):
+    """
+    Train the technique probe on one language, apply it frozen to the rest.
+    The strong test: English and Japanese share no script and no cognate
+    vocabulary, so a direction separating Euclid from Furstenberg in both
+    is not riding on English terms.
+
+    Run on RAW embeddings. Language centring would make this trivial and
+    would not tell you whether the encoder aligns languages or whether the
+    centring does.
+    """
+    le = LabelEncoder().fit([r["technique"] for r in recs])
+    tr = [j for j, r in enumerate(recs) if r["language"] == train_lang]
+    clf = LogisticRegression(max_iter=3000).fit(
+        X[tr], le.transform([recs[j]["technique"] for j in tr]))
+    chance = 1 / len(le.classes_)
+    accs = []
+    for lang in sorted({r["language"] for r in recs} - {train_lang}):
+        i = [j for j, r in enumerate(recs) if r["language"] == lang]
+        acc = clf.score(X[i], le.transform([recs[j]["technique"] for j in i]))
+        accs.append(acc)
+        print(f"  {train_lang} -> {lang:<4} n={len(i):<4} acc={acc:.3f}")
+    print(f"\n  mean {np.mean(accs):.3f}   chance {chance:.3f}")
+    print("  Degradation on zh/ja quantifies how much of the technique")
+    print("  direction rides on shared Indo-European vocabulary.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", type=Path, default=Path("proofs.jsonl"))
@@ -493,6 +560,12 @@ def main():
 
     rule("9. Lexical baseline within one language")
     lexical_baseline(X, recs, "en")
+
+    rule("10. Technique structure within each style")
+    style_slices(X, recs)
+
+    rule("11. Cross-lingual transfer, raw embeddings")
+    cross_lingual_transfer(X, recs)
 
 
 if __name__ == "__main__":
