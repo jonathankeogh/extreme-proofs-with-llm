@@ -34,8 +34,8 @@ Reported, in order:
 
 Usage:
     pip install sentence-transformers umap-learn scikit-learn matplotlib
-    python embed.py
-    python embed.py --model intfloat/multilingual-e5-large
+    python analyse.py
+    python analyse.py --model intfloat/multilingual-e5-large
 """
 
 import argparse

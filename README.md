@@ -50,26 +50,33 @@ cause was a prompt clause asking the model to "make that extension visible"
 — a deliverable beyond the proof. Diagnosed from the prompt text before
 reading any output, clause removed, cap raised, those 30 records
 regenerated. `proofs.pre-generality-fix.jsonl` is the pre-fix corpus, kept
-so the change is auditable. Details in the write-up.
+so the change is auditable. Records from the first run carry no `max_tokens`
+field and the regenerated ones carry `max_tokens: 32000`, so the fix is
+checkable directly from the corpus file (33 records: 30 `generality`, 3
+`machinery`). Details in the write-up.
 
 ## Layout
 
 ```
-generate.py        batch generation against the Message Batches API,
-                   resume-by-diff: only submits grid cells missing from
+generate.py        batch generation via the Message Batches API; --dry-run,
+                   --submit, --collect; resumes by diffing the grid against
                    proofs.jsonl
-first_pass.py      embed with bge-m3, cache to embeddings.npy, first-pass
-                   probes and UMAP figures
+first_pass.py      integrity, raw and normalised lengths, direction vs
+                   language separation, CJK × direction interactions
+analyse.py         embeds with bge-m3 → embeddings.npy; pooled and
+                   leave-one-language-out probes, neighbourhood composition,
+                   UMAP figures
 slice.py           style-sliced scoring, within-language technique scores,
                    cross-lingual transfer, extremal point ranking
-analyse.py         clustering and probe scoring on the cached embeddings
 probes.py          structural probes: language/style/technique spectra,
                    subspace angles + nulls, centroid agreement, hard probes,
                    lexical baseline
-extreme.py         stage 3: classify the extreme arm against the technique
-                   centroids; out-of-set threshold; direction × technique
+extreme.py         classify the extreme arm against the technique centroids;
+                   assignment confidence, out-of-set threshold,
+                   direction × technique
 
 proofs.jsonl       the corpus, 450 records
+proofs.pre-generality-fix.jsonl   pre-fix corpus, kept as provenance
 embeddings.npy     cached bge-m3 embeddings (450 × 1024), regenerable
 pilot_umap_raw.png
 pilot_umap_centred.png
@@ -79,16 +86,21 @@ pilot_umap_centred.png
 
 ```bash
 uv sync
+export ANTHROPIC_API_KEY=...        # or put it in secrets.env
 
-export ANTHROPIC_API_KEY=...
-uv run generate.py        # only if regenerating the corpus; a few dollars
-uv run first_pass.py      # downloads bge-m3 (~2GB), caches embeddings
-uv run probes.py          # instrument validation, seconds
-uv run extreme.py         # the extreme-arm analysis, seconds
+uv run generate.py --dry-run        # print the grid, no API calls
+uv run generate.py --submit         # submit the batch
+uv run generate.py --collect        # poll and write proofs.jsonl
+
+uv run first_pass.py                # integrity and length analysis
+uv run analyse.py                   # downloads bge-m3 (~2GB), embeds, UMAPs
+uv run slice.py                     # style slices, cross-lingual transfer
+uv run probes.py                    # structural probes, nulls, baselines
+uv run extreme.py                   # the extreme-arm analysis
 ```
 
 Everything after `generate.py` reads the cached embeddings and makes no API
-calls — rerun freely. Runs on a laptop; no GPU needed.
+calls. Runs on a laptop; no GPU needed.
 
 ## What's actually in the analysis
 

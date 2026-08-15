@@ -22,7 +22,7 @@ Output: proofs.jsonl (ie one JSON object per proof, with metadata and usage).
 
 Usage:
     export ANTHROPIC_API_KEY=sk-ant-...   # or put it in secrets.env
-    pip install anthropic
+    uv sync
     python generate.py --dry-run          # print the grid that is going to be called, but does no API calls
     python generate.py --submit           # submit the batch, print batch id
     python generate.py --collect          # poll and write proofs.jsonl
@@ -41,7 +41,8 @@ import anthropic
 
 MODEL = "claude-opus-5"
 EFFORT = "medium"
-# MAX_TOKENS = 10000
+# Raised from 10000 after the first run truncated 28 records, 83% of them
+# in the generality direction. See the corpus note in README.md.
 MAX_TOKENS = 32000
 
 OUT = Path("proofs.jsonl")

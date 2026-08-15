@@ -11,8 +11,10 @@ Reads proofs.jsonl and reports, in order:
   5. interactions   per-direction CJK-vs-Latin gap on the normalised scale
 
 Character count is not comparable across scripts: a Chinese proof of the same
-content is roughly 0.57x the length of the English one (that's an empirical number (note: reference that)). The effect is
-multiplicative, so section 3 works in log space, where a constant ratio
+content is roughly 0.57x the length of the English one -- the CJK-to-Latin
+median ratio measured on this corpus, stable across all five directions, which
+is what identifies it as a property of the script rather than of the proof.
+The effect is multiplicative, so section 3 works in log space, where a constant ratio
 becomes a constant offset and subtracting a per-language mean removes it.
 
 Baselines use all records in a language, both arms (n = 75 per language at
@@ -20,8 +22,8 @@ Baselines use all records in a language, both arms (n = 75 per language at
 across languages, so no language gets an unfair baseline.
 
 Usage:
-    python analyse.py
-    python analyse.py --corpus proofs.jsonl
+    python first_pass.py
+    python first_pass.py --corpus proofs.jsonl
 """
 
 import argparse

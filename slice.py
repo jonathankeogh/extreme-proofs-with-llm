@@ -26,7 +26,7 @@ Answers four questions the headline numbers can't:
      corpus-quality failures where the generator ignored the instruction.)
 
 Usage:
-    python slices.py
+    python slice.py
 """
 
 import json
@@ -50,8 +50,11 @@ def load():
     records = [json.loads(l) for l in CORPUS.open() if l.strip()]
     X = np.load(EMB)
     assert len(records) == len(X), (
-        f"{len(records)} proofs but {len(X)} embeddings -- rerun analyze.py")
-    return records, X
+        f"{len(records)} proofs but {len(X)} embeddings -- rerun analyse.py")
+    # Technique arm only: the extreme arm has no technique or style label,
+    # so every question in this file is undefined on it.
+    idx = [i for i, r in enumerate(records) if r["arm"] == "technique"]
+    return [records[i] for i in idx], X[idx]
 
 
 def scores(X, y, name, indent="  "):
