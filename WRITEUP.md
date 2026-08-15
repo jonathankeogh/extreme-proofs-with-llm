@@ -507,6 +507,64 @@ not visible from the geometry — only from the text.
 
 ---
 
+## A second coordinate, and the error it fixes
+
+Everything above measures a proof by where its *wording* lands. That is what
+produced the central error: machinery went to Fürstenberg because Fürstenberg
+*sounds* like heavy mathematics. So build the coordinate that measures what a
+proof **depends on** instead — the count of distinct named external results it
+invokes. Chebotarev density and Hadamard factorisation are named results;
+"let $p$ be prime" is not.
+
+This is cheap to build because mathematician surnames stay in Latin script
+inside Chinese and Japanese proofs — `Euler 乘积公式`, `Riemann の解析接続` —
+so one registry of 60 named results, with localised forms for the few that get
+translated (算术基本定理, ユークリッドの補題), reads all six languages.
+
+Ordering the directions, it does what the prompts predict:
+
+| direction | invoked results | normalised length |
+|---|---|---|
+| machinery | 16.63 | +0.86 |
+| generality | 1.27 | +0.28 |
+| visuality | 0.03 | +0.33 |
+| elementarity | 0.00 | −0.04 |
+| brevity | 0.00 | −1.81 |
+
+**It separates machinery from Fürstenberg perfectly.** Fürstenberg's proof
+invokes 0.32 named results against machinery's 16.63; a single threshold at
+≥2 classifies all ninety records correctly, accuracy 1.000, where the
+embedding scored 0.133 and called 26 of 30 machinery proofs Fürstenberg.
+And the zero is *correct*, not a registry miss: read a Fürstenberg record and
+it proves its own two lemmas from the definition of a topology, quoting
+nothing. That is precisely the claim I made from reading twelve proofs by
+hand, now measured across all 450.
+
+Two honest caveats. First, the count is **not** independent of length —
+Spearman +0.73 within the extreme arm, because quoting theorems takes words.
+What rules out the confound is a length-matched control: the longest thirty
+technique-arm records are *longer* than the machinery proofs (z +1.37 against
++0.86) and invoke 1.43 against 16.63. At equal length, dependence still
+separates them. Second, the registry has a recall ceiling, and it is worst
+exactly where the proofs are heaviest — CJK machinery proofs score 13.6
+against Latin's 18.2, because they quote the most obscure results, whose
+localised name forms are least well covered. That is a limit on the
+instrument, an order of magnitude too small to touch the distinction it is
+being used to draw, but it means the absolute counts are a floor rather than
+a measurement.
+
+With normalised length this gives two coordinates that mean something, and
+they immediately confirm the reading of Part 2: brevity and elementarity have
+*identical* second coordinates (0.00 and 0.00) and differ only on the first
+(−1.81 against −0.04). The same vertex at two lengths, now measurable rather
+than asserted.
+
+What it does not fix is visuality. Scoring 0.03, it says only that the visual
+proofs invoke nothing — it cannot tell the comb from the rods from plain
+$P+1$. The presentation axis still has no measurement.
+
+---
+
 ## What I got wrong
 
 Four claims formed and abandoned, in order:
@@ -560,8 +618,14 @@ the code, not after.
   Both are CJK, so this is not a script effect.
 - **Register versus argument is not measured, only observed.** I claim
   visuality is a presentation axis on the basis of three English records. A
-  proper test would need a measure that separates the two — which is exactly
-  what this corpus shows the embedding does not provide.
+  proper test would need a measure that separates the two — which neither the
+  embedding nor the dependency coordinate provides.
+- **The dependency coordinate is a registry, not an extractor.** It counts
+  60 named results I curated by reading the corpus, so it cannot see a result
+  I failed to anticipate, and its counts are a floor rather than a
+  measurement. It is also fitted to this theorem: a different theorem would
+  need a different registry, which is exactly the weakness that automatic
+  dependency extraction would remove.
 
 One limitation from an earlier draft has been resolved and is worth
 recording as such: I had flagged `euler_product` as the most-confused
@@ -572,20 +636,26 @@ centrality of Euclid. On `bge-m3` the technique probe misclassifies 0 of
 
 ## What would come next
 
-Two things, in order of cost.
+**Hard, and still open.** "Same argument, different presentation" has no
+measurement in this pipeline at all. The visuality records make that
+concrete: combs, rods, and $P+1$ are one point in proof space and three
+points in embedding space, and the dependency coordinate above scores all
+three identically at zero, so it does not help. Until that is fixed, sampled
+geometry measures writing as much as it measures mathematics.
 
-**Cheap.** A second coordinate that is not lexical: **the count of
-externally-invoked results** — lemmas and prior theorems cited rather than
-proved. Fürstenberg invokes topology axioms; Euclid invokes almost nothing;
-the Chebotarev proof invokes a great deal. Countable from an abstracted step
-sequence, script-independent, and not a monotone function of length. With
-that plus normalised length you would have two genuine coordinates, and
-hull-fitting would start to mean something.
+**Cheaper, and worth doing first.** Two coordinates is enough to place five
+directions but not enough to fit anything. A third — an abstracted step
+count, or the depth of the dependency graph rather than its width — would
+make hull-fitting a meaningful operation rather than a figure of speech.
+Replacing the hand-built registry with dependency extraction from the proof
+text would also lift the recall ceiling noted above, and would generalise to
+theorems whose named results I did not anticipate, which the current registry
+cannot.
 
-**Hard.** "Same argument, different presentation" has no measurement in this
-pipeline at all. The visuality records make that concrete: combs, rods, and
-$P+1$ are one point in proof space and three points in embedding space.
-Until that is fixed, sampled geometry measures writing as much as it
-measures mathematics.
+**The real test.** A second theorem. One theorem gives one space, and the
+interesting claim — that brevity and machinery oppose each other the same way
+for $\sqrt 2$ as for the primes — needs at least two. Everything in this
+pipeline after generation now runs on cached files in seconds, so the cost is
+one more batch job.
 
 Code and corpus: [link]

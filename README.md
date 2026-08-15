@@ -73,6 +73,9 @@ probes.py          structural probes: language/style/technique spectra,
 extreme.py         classify the extreme arm against the technique centroids;
                    assignment confidence, out-of-set threshold,
                    direction × technique + permutation null
+coordinates.py     the non-lexical second coordinate: count of distinct
+                   named external results invoked, with script-independence,
+                   length-confound and machinery-vs-Fürstenberg tests
 
 WRITEUP.md         the write-up
 proofs.jsonl       the corpus, 450 records
@@ -96,6 +99,7 @@ uv run first_pass.py                # integrity and length analysis
 uv run analyse.py                   # downloads bge-m3 (~2GB), embeds, UMAPs
 uv run probes.py                    # structural probes, nulls, baselines
 uv run extreme.py                   # the extreme-arm analysis
+uv run coordinates.py               # the second coordinate; no embeddings
 ```
 
 Everything after `generate.py` reads the cached embeddings and makes no API
@@ -131,6 +135,13 @@ identity is largely lexical.
 **Did not hold.** "Four of five directions leave the reference set,"
 inferred from an out-of-set cosine threshold. Reading twelve proofs showed
 only `machinery` does; the rest are out-of-*register*, not out-of-set.
+
+**Held, and it fixes the main error.** A non-lexical second coordinate
+(`coordinates.py`): the count of distinct named external results a proof
+invokes. It separates the machinery arm from Fürstenberg at accuracy 1.000
+(16.63 against 0.32 invoked results) where the embedding merged them, and it
+survives a length-matched control — the longest 30 technique-arm records are
+*longer* than the machinery proofs and invoke 1.43.
 
 The nulls and baselines are the point. `angle_null` and `lexical_baseline`
 in `probes.py` each take about ten seconds and each killed a headline.
