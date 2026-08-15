@@ -66,15 +66,15 @@ first_pass.py      integrity, raw and normalised lengths, direction vs
 analyse.py         embeds with bge-m3 → embeddings.npy; pooled and
                    leave-one-language-out probes, neighbourhood composition,
                    UMAP figures
-slice.py           style-sliced scoring, within-language technique scores,
-                   cross-lingual transfer, extremal point ranking
 probes.py          structural probes: language/style/technique spectra,
                    subspace angles + nulls, centroid agreement, hard probes,
-                   lexical baseline
+                   lexical baseline, style slices, cross-lingual transfer,
+                   within-language scores, extremal ranking
 extreme.py         classify the extreme arm against the technique centroids;
                    assignment confidence, out-of-set threshold,
-                   direction × technique
+                   direction × technique + permutation null
 
+WRITEUP.md         the write-up
 proofs.jsonl       the corpus, 450 records
 proofs.pre-generality-fix.jsonl   pre-fix corpus, kept as provenance
 embeddings.npy     cached bge-m3 embeddings (450 × 1024), regenerable
@@ -94,7 +94,6 @@ uv run generate.py --collect        # poll and write proofs.jsonl
 
 uv run first_pass.py                # integrity and length analysis
 uv run analyse.py                   # downloads bge-m3 (~2GB), embeds, UMAPs
-uv run slice.py                     # style slices, cross-lingual transfer
 uv run probes.py                    # structural probes, nulls, baselines
 uv run extreme.py                   # the extreme-arm analysis
 ```
@@ -114,8 +113,10 @@ means, so not an artefact of in-sample centring. This is a replication of
 [Libovický et al. 2020](https://arxiv.org/abs/2004.05160), which I found
 after the fact.
 
-**Held.** The extreme-arm direction × technique mapping, identical in all
-six languages (χ² = 365.5, Cramér's V = 0.781).
+**Held.** The extreme-arm direction × technique mapping (χ² = 365.5,
+Cramér's V = 0.781; permutation null over direction labels puts p < 1/20000,
+against a null mean of 16.1). Identical in all six languages for brevity,
+elementarity and generality; machinery and visuality vary at the edges.
 
 **Did not hold.** Near-orthogonal principal angles between the factor
 subspaces (min 78.9°). A permuted-label null lands at 77.0° (p = 0.86) and a
@@ -133,6 +134,11 @@ only `machinery` does; the rest are out-of-*register*, not out-of-set.
 
 The nulls and baselines are the point. `angle_null` and `lexical_baseline`
 in `probes.py` each take about ten seconds and each killed a headline.
+
+**Held, and it answers an open question.** Cross-lingual technique transfer
+on *uncentred* bge-m3 (`probes.py` §11): en→zh 0.900, en→ja 0.920, against
+0.62 and 0.50 on the earlier 768-dim encoder. The transfer gap was the
+encoder, not the centring.
 
 **Known failing check.** `extreme.py` section 0 tests whether language means
 estimated on the technique arm remove language from the extreme arm. They do

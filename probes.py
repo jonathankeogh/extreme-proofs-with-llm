@@ -54,6 +54,23 @@ model download -- seconds, not minutes.
                          cell appears on both sides. Bounds how much of the
                          cross-language result is terminology.
 
+ 10. style_slices        Does technique structure depend on style? Notation
+                         is shared across languages and is technique-
+                         specific; prose is neither.
+
+ 11. cross_lingual       Technique probe trained on one language, applied
+                         frozen to the rest, on RAW embeddings. Centring
+                         would make this trivial and would not say whether
+                         the encoder aligns languages or the centring does.
+
+ 12. within_language     Technique clustering with language held fixed.
+                         Unsupervised scores only -- the probe saturates.
+
+ 13. extremal_ranking    Techniques ranked by centroid distance from the
+                         others, with own-spread alongside as the caveat.
+                         Explains what the machinery arm attaches to in
+                         stage 3.
+
 Usage:
     python probes.py
     python probes.py --arm technique --knn 10
@@ -68,7 +85,7 @@ from pathlib import Path
 import numpy as np
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
-from sklearn.model_selection import cross_val_score
+from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.preprocessing import LabelEncoder
 
 FACTORS = ("technique", "language", "style")
@@ -498,6 +515,82 @@ def cross_lingual_transfer(X, recs, train_lang="en"):
     print("  direction rides on shared Indo-European vocabulary.")
 
 
+# ---------------------------------------------------------------- 12
+
+def within_language(X, recs):
+    """
+    Technique structure with language held fixed. If technique clusters
+    inside a single language, the structure is not a language artifact.
+
+    Probe accuracy is NOT reported here. Fifty records in 1024 dimensions
+    are linearly separable almost regardless of the labels -- the probe
+    reads 1.000 in every language and carries no information (item 6 makes
+    the same point at length). The unsupervised scores do carry information,
+    and they vary a lot: technique clusters far more cleanly in ja than in
+    zh, which is not what a purely lexical account predicts.
+    """
+    from sklearn.cluster import KMeans
+    from sklearn.metrics import (normalized_mutual_info_score,
+                                 adjusted_rand_score, silhouette_score)
+
+    print(f"  {'language':<10}{'n':>5}{'NMI':>9}{'ARI':>9}{'silhouette':>13}")
+    for lang in sorted({r["language"] for r in recs}):
+        i = [j for j, r in enumerate(recs) if r["language"] == lang]
+        y = LabelEncoder().fit_transform([recs[j]["technique"] for j in i])
+        km = KMeans(n_clusters=len(set(y)), n_init=10,
+                    random_state=0).fit(X[i])
+        print(f"  {lang:<10}{len(i):>5}"
+              f"{normalized_mutual_info_score(y, km.labels_):>9.3f}"
+              f"{adjusted_rand_score(y, km.labels_):>9.3f}"
+              f"{silhouette_score(X[i], y):>13.3f}")
+
+
+# ---------------------------------------------------------------- 13
+
+def extremal_ranking(X, recs):
+    """
+    Rank techniques by mean distance from every other technique's centroid.
+
+    This is a ranking of centroid distances, not a vertex of a hull -- the
+    own-spread column is the caveat, and it is the same size as the
+    distances, so the clouds interpenetrate heavily. Reported because
+    Furstenberg's extremality is what explains the machinery arm attaching
+    to it in stage 3: unusual vocabulary, not unusual mathematics.
+
+    The second half asks where the technique probe fails. Those would be
+    corpus-quality suspects (the generator ignoring the instruction).
+    """
+    techs = sorted({r["technique"] for r in recs})
+    idxs = {t: [i for i, r in enumerate(recs) if r["technique"] == t]
+            for t in techs}
+    cents = {t: X[i].mean(axis=0) for t, i in idxs.items()}
+
+    rows = []
+    for t in techs:
+        d = float(np.mean([np.linalg.norm(cents[t] - cents[o])
+                           for o in techs if o != t]))
+        spread = float(np.mean(np.linalg.norm(X[idxs[t]] - cents[t], axis=1)))
+        rows.append((d, spread, t))
+    rows.sort(reverse=True)
+
+    print(f"  {'technique':<18}{'dist to others':>16}{'own spread':>13}")
+    for d, spread, t in rows:
+        print(f"  {t:<18}{d:>16.3f}{spread:>13.3f}")
+    print(f"\n  most extreme {rows[0][2]}   most central {rows[-1][2]}")
+    print("  Own spread is comparable to the distance to other centroids")
+    print("  (and larger, for all but the top technique): the groups")
+    print("  interpenetrate. This ranks centroids; it fits no hull.")
+
+    y = LabelEncoder().fit_transform([r["technique"] for r in recs])
+    pred = cross_val_predict(LogisticRegression(max_iter=3000), X, y, cv=5)
+    n_wrong = int((pred != y).sum())
+    print(f"\n  technique probe errors: {n_wrong}/{len(y)}")
+    if n_wrong == 0:
+        print("  None. The euler_product/euclid confusion seen on the")
+        print("  earlier 768-dim encoder does not reproduce here, which")
+        print("  points at that encoder rather than at corpus quality.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", type=Path, default=Path("proofs.jsonl"))
@@ -566,6 +659,12 @@ def main():
 
     rule("11. Cross-lingual transfer, raw embeddings")
     cross_lingual_transfer(X, recs)
+
+    rule("12. Technique structure with language held fixed")
+    within_language(X, recs)
+
+    rule("13. Extremal ranking of the techniques")
+    extremal_ranking(X, recs)
 
 
 if __name__ == "__main__":

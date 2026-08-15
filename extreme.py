@@ -61,6 +61,43 @@ def centre(recs, X, mu, idx):
     return Xc / np.clip(n, 1e-9, None)
 
 
+def perm_test(tab, n_perm=20000, seed=0):
+    """
+    Permutation null for the direction x technique table.
+
+    chi2_contingency's p-value assumes expected cell counts are not tiny.
+    Here they are: 25 cells, and some techniques are picked once or never
+    across all 150 records, so the asymptotic p is not trustworthy even
+    though the effect is obvious. Shuffling the direction labels against
+    the assigned techniques costs a second and needs no such assumption.
+
+    Reported as chi2 recomputed on each shuffle; p is the fraction of
+    shuffles reaching the observed statistic.
+    """
+    obs = chi2_contingency(tab)[0]
+    rows = np.repeat(np.arange(tab.shape[0]), tab.sum(1))
+    cols = np.repeat(np.arange(tab.shape[1]), tab.sum(0))
+    rng = np.random.default_rng(seed)
+    null = np.empty(n_perm)
+    for b in range(n_perm):
+        shuf = rng.permutation(cols)
+        t = np.zeros_like(tab)
+        np.add.at(t, (rows, shuf), 1)
+        # chi2 by hand: the shuffled table can have empty rows/columns.
+        exp = np.outer(t.sum(1), t.sum(0)) / t.sum()
+        null[b] = np.where(exp > 0, (t - exp) ** 2 / np.maximum(exp, 1e-12),
+                           0.0).sum()
+    hits = int((null >= obs).sum())
+    p = (hits + 1) / (n_perm + 1)
+    print(f"\n  permutation null ({n_perm} shuffles of the direction "
+          f"labels):")
+    print(f"    observed chi2 {obs:.1f}   null mean {null.mean():.1f}   "
+          f"null max {null.max():.1f}")
+    print(f"    p = {p:.5f}  ({hits} of {n_perm} shuffles >= observed)")
+    print("    Distribution-free, so it does not lean on expected counts")
+    print("    that the sparse cells here would not support.")
+
+
 def rule(t):
     print(f"\n{t}\n" + "-" * len(t))
 
@@ -151,6 +188,7 @@ def main():
             print("  i.e. every direction draws from the same marginal.")
             print("  p small -> the direction prompt changes which argument")
             print("  the model reaches for. That is the second coordinate.")
+            perm_test(tab)
         else:
             print("\n  Some row or column is empty; chi2 not computed.")
 
