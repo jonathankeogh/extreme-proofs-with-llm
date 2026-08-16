@@ -18,14 +18,14 @@ Total at N=5: 450 proofs
 Note we are sticking with one model, Opus 5 Medium. This is because we don't want model to be a factor, and Opus 5 is better at instruction following
 for things like "the most elementary proof"
 
-Output: proofs.jsonl (ie one JSON object per proof, with metadata and usage).
+Output: proofs_primes.jsonl (ie one JSON object per proof, with metadata and usage).
 
 Usage:
     export ANTHROPIC_API_KEY=sk-ant-...   # or put it in secrets.env
     uv sync
-    python generate.py --dry-run          # print the grid that is going to be called, but does no API calls
-    python generate.py --submit           # submit the batch, print batch id
-    python generate.py --collect          # poll and write proofs.jsonl
+    python generate_primes.py --dry-run   # print the grid that is going to be called, but does no API calls
+    python generate_primes.py --submit    # submit the batch, print batch id
+    python generate_primes.py --collect   # poll and write proofs_primes.jsonl
 """
 
 import argparse
@@ -45,7 +45,7 @@ EFFORT = "medium"
 # in the generality direction. See the corpus note in README.md.
 MAX_TOKENS = 32000
 
-OUT = Path("proofs.jsonl")
+OUT = Path("proofs_primes.jsonl")
 BATCH_ID_FILE = Path(".batch_id")
 META_FILE = Path(".batch_meta.json")
 
@@ -90,6 +90,48 @@ DIRECTIONS = {
                  "tools would suffice.",
 }
 
+# Scope arm, added after the sqrt2 design showed what it buys. Conway and
+# Shipman's test for whether two proofs are really different is whether they
+# settle different sets of statements, and the primes theorem has such a
+# ladder too -- it is just not indexed by a number, so it is easier to miss.
+# Each target below sits on a boundary where some of the five techniques
+# stop working, so which argument the model produces is checkable against a
+# known answer:
+#
+#   infinitude        the base theorem, asked with NO selection criterion.
+#                     This is the centre cell: the unprompted interior point
+#                     that every extremal direction should be read against.
+#                     The corpus had no such reference until now.
+#   primes_3_mod_4    Euclid's argument adapts directly (take 4*P - 1).
+#   primes_1_mod_4    still Euclidean, but needs the extra input that any
+#                     prime dividing x^2 + 1 is 1 mod 4.
+#   primes_2_mod_5    no Euclidean proof exists. Murty (1988): a Euclidean
+#                     proof for a mod q exists iff a^2 = 1 mod q, and
+#                     2^2 = 4 is not 1 mod 5. Only the analytic method
+#                     reaches this one, so it is the sharpest boundary here.
+#   sum_reciprocals   Euler and Erdos give it; Euclid and Fermat do not.
+#                     Separates the counting arguments from the
+#                     constructive ones.
+#   effective_bound   Euclid and Fermat give an explicit bound; Furstenberg
+#                     gives none. The constructive pole.
+SCOPE_TARGETS = {
+    "infinitude": "there are infinitely many prime numbers",
+    "primes_3_mod_4": "there are infinitely many primes congruent to 3 "
+                      "modulo 4",
+    "primes_1_mod_4": "there are infinitely many primes congruent to 1 "
+                      "modulo 4",
+    "primes_2_mod_5": "there are infinitely many primes congruent to 2 "
+                      "modulo 5",
+    "sum_reciprocals": "the sum of the reciprocals of the primes diverges",
+    "effective_bound": "the n-th prime satisfies p_n < 2^(2^n) for every n",
+}
+
+# The centre cell proves the corpus's own theorem, so it carries the corpus's
+# own theorem name; the rest name themselves.
+SCOPE_THEOREM = {t: ("infinitude_of_primes" if t == "infinitude" else t)
+                 for t in SCOPE_TARGETS}
+SCOPE_BY_THEOREM = {v: k for k, v in SCOPE_THEOREM.items()}
+
 LANGUAGES = {
     "en": "English",
     "fr": "French",
@@ -128,6 +170,16 @@ Language: write the entire proof in {language}.
 
 Output only the proof itself. No title, no preamble, no closing remarks."""
 
+# No selection criterion, deliberately: this arm asks what the model does
+# when nothing is being maximised.
+SCOPE_TEMPLATE = """Write a complete, correct, self-contained proof that {statement}.
+
+Choose the proof yourself. You are not restricted to any particular argument.
+
+Language: write the entire proof in {language}.
+
+Output only the proof itself. No title, no preamble, no closing remarks."""
+
 
 def load_env():
     """Read secrets.env if present"""
@@ -141,8 +193,15 @@ def load_env():
             os.environ.setdefault(k.strip(), v.strip())
 
 
-def build_grid(n_samples: int):
-    """This is a genrator that yields metadata dicts for both arms"""
+def build_grid(n_samples: int, scope_samples: int = 0):
+    """
+    Yields metadata dicts for every cell.
+
+    scope_samples=0 omits the scope arm, which is what reproduces the
+    original 450-record corpus exactly. The technique and extreme cells are
+    emitted first and with unchanged ids, so --submit against an existing
+    proofs_primes.jsonl asks only for the new cells.
+    """
     for tech, lang, style, k in itertools.product(
         TECHNIQUES, LANGUAGES, STYLES, range(n_samples)
     ):
@@ -175,6 +234,22 @@ def build_grid(n_samples: int):
             "effort": EFFORT,
             "max_tokens": MAX_TOKENS,
         }
+    for target, lang, k in itertools.product(
+        SCOPE_TARGETS, LANGUAGES, range(scope_samples)
+    ):
+        yield {
+            "id": f"s__{target}__{lang}__{k}",
+            "arm": "scope",
+            "theorem": SCOPE_THEOREM[target],
+            "technique": None,
+            "direction": None,
+            "language": lang,
+            "style": None,
+            "sample_index": k,
+            "model": MODEL,
+            "effort": EFFORT,
+            "max_tokens": MAX_TOKENS,
+        }
 
 
 def prompt_for(meta: dict) -> str:
@@ -184,8 +259,13 @@ def prompt_for(meta: dict) -> str:
             language=LANGUAGES[meta["language"]],
             style=STYLES[meta["style"]],
         )
-    return EXTREME_TEMPLATE.format(
-        direction=DIRECTIONS[meta["direction"]],
+    if meta["arm"] == "extreme":
+        return EXTREME_TEMPLATE.format(
+            direction=DIRECTIONS[meta["direction"]],
+            language=LANGUAGES[meta["language"]],
+        )
+    return SCOPE_TEMPLATE.format(
+        statement=SCOPE_TARGETS[SCOPE_BY_THEOREM[meta["theorem"]]],
         language=LANGUAGES[meta["language"]],
     )
 
@@ -226,7 +306,7 @@ def guard_output():
 
 
 def load_done() -> set[str]:
-    """ids already written to proofs.jsonl."""
+    """ids already written to proofs_primes.jsonl."""
     if not OUT.exists():
         return set()
     with OUT.open() as f:
@@ -263,7 +343,7 @@ def collect(client, batch_id: str, poll_seconds: int = 60):
               f"errored={c.errored} processing={c.processing}")
         time.sleep(poll_seconds)
 
-    n_ok = n_err = 0
+    n_ok = n_err = n_trunc = 0
     in_tok = out_tok = 0
     with OUT.open("a") as f:
         for result in client.messages.batches.results(batch_id):
@@ -278,6 +358,7 @@ def collect(client, batch_id: str, poll_seconds: int = 60):
             msg = result.result.message
             text = "".join(b.text for b in msg.content if b.type == "text")
             if msg.stop_reason == "max_tokens":
+                n_trunc += 1
                 print(f"TRUNCATED {result.custom_id} -- raise MAX_TOKENS")
             in_tok += msg.usage.input_tokens
             out_tok += msg.usage.output_tokens
@@ -293,27 +374,44 @@ def collect(client, batch_id: str, poll_seconds: int = 60):
             }, ensure_ascii=False) + "\n")
             n_ok += 1
 
-    print(f"\n{n_ok} succeeded, {n_err} failed. Corpus at {OUT.resolve()}")
+    print(f"\n{n_ok} succeeded, {n_err} failed, {n_trunc} truncated. "
+          f"Corpus at {OUT.resolve()}")
     print(f"Tokens: {in_tok} in, {out_tok} out")
+    if n_trunc:
+        print("Truncated records are incomplete proofs, and they are now in "
+              "the corpus, so a re-run will NOT replace them: the resume "
+              "logic keys on id. Raise MAX_TOKENS, delete those lines, then "
+              "--submit again to refill the cells.")
     BATCH_ID_FILE.unlink(missing_ok=True)      # <-- new
 
 
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--samples", type=int, default=5,
-                    help="samples per cell (default 5 -> 450 proofs total)")
+                    help="samples per cell in the technique and extreme arms "
+                         "(default 5 -> the 450-proof corpus)")
+    ap.add_argument("--scope-arm", action="store_true",
+                    help="also generate the scope arm and the centre cell "
+                         "(off by default; the published corpus is the 450)")
+    ap.add_argument("--scope-samples", type=int, default=3,
+                    help="samples per cell in the scope arm (default 3)")
     ap.add_argument("--submit", action="store_true")
     ap.add_argument("--collect", action="store_true")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
 
     load_env()
-    grid = list(build_grid(args.samples))
+    n_scope = args.scope_samples if args.scope_arm else 0
+    grid = list(build_grid(args.samples, n_scope))
     n_tech = len(TECHNIQUES) * len(LANGUAGES) * len(STYLES) * args.samples
     n_ext = len(DIRECTIONS) * len(LANGUAGES) * args.samples
+    n_scp = len(SCOPE_TARGETS) * len(LANGUAGES) * n_scope
     print(f"Grid: {len(grid)} proofs "
           f"= {n_tech} technique arm + {n_ext} extreme arm "
+          f"+ {n_scp} scope arm "
           f"(model={MODEL}, effort={EFFORT})")
+    if not args.scope_arm:
+        print("Scope arm omitted; pass --scope-arm to include it.")
 
     if args.dry_run:
         for g in grid:

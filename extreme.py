@@ -6,7 +6,7 @@ language is additive and removable, and after centring, technique centroids
 built from one style classify the other at 1.000. That licenses exactly one
 thing -- classifying the extreme arm, which carries no technique label.
 
-The question: when asked for the SHORTEST proof, which of the five known
+The question: when asked for the SHORTEST proof, which of the known
 arguments does the model produce? When asked for the HEAVIEST MACHINERY?
 
 If the answer differs by direction, technique choice is a second coordinate.
@@ -23,10 +23,15 @@ something:
   3. Length collinearity. If technique choice tracks length, it is the
      coordinate you already have wearing a hat.
 
+Nothing here names a technique, a direction or a theorem: the labels come
+from the corpus, so the same script runs on any corpus generate_*.py emits.
+
 Usage:
     python extreme.py
+    python extreme.py --corpus proofs_sqrt2.jsonl --cache embeddings_sqrt2.npy
 """
 
+import argparse
 import json
 from collections import Counter, defaultdict
 from pathlib import Path
@@ -34,15 +39,24 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import chi2_contingency, spearmanr
 
-CORPUS = Path("proofs.jsonl")
-CACHE = Path("embeddings.npy")
+CORPUS = Path("proofs_primes.jsonl")
+CACHE = Path("embeddings_primes.npy")
 
 
-def load():
-    recs = [json.loads(l) for l in CORPUS.open() if l.strip()]
-    X = np.load(CACHE)
+def load(corpus: Path, cache: Path):
+    recs = [json.loads(l) for l in corpus.open() if l.strip()]
+    X = np.load(cache)
     if len(X) != len(recs):
-        raise SystemExit(f"{CACHE}: {len(X)} rows, {CORPUS}: {len(recs)}.")
+        raise SystemExit(f"{cache}: {len(X)} rows, {corpus}: {len(recs)}.")
+    # The scope arm proves different theorems. It must not reach the language
+    # means: those are the offset subtracted from every record here, and a
+    # different theorem shifts them for reasons that have nothing to do with
+    # language.
+    keep = [i for i, r in enumerate(recs) if r.get("arm") != "scope"]
+    if len(keep) != len(recs):
+        print(f"dropped {len(recs) - len(keep)} scope-arm records "
+              f"(different theorems; not comparable to these centroids)")
+        recs, X = [recs[i] for i in keep], X[keep]
     return recs, X
 
 
@@ -66,9 +80,10 @@ def perm_test(tab, n_perm=20000, seed=0):
     Permutation null for the direction x technique table.
 
     chi2_contingency's p-value assumes expected cell counts are not tiny.
-    Here they are: 25 cells, and some techniques are picked once or never
-    across all 150 records, so the asymptotic p is not trustworthy even
-    though the effect is obvious. Shuffling the direction labels against
+    Here they are: the table has one cell per (direction, technique) pair,
+    and some techniques are picked once or never across the whole extreme
+    arm, so the asymptotic p is not trustworthy even though the effect is
+    obvious. Shuffling the direction labels against
     the assigned techniques costs a second and needs no such assumption.
 
     Reported as chi2 recomputed on each shuffle; p is the fraction of
@@ -103,7 +118,12 @@ def rule(t):
 
 
 def main():
-    recs, X = load()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--corpus", type=Path, default=CORPUS)
+    ap.add_argument("--cache", type=Path, default=CACHE)
+    args = ap.parse_args()
+
+    recs, X = load(args.corpus, args.cache)
     tech_i = [j for j, r in enumerate(recs) if r["arm"] == "technique"]
     extr_i = [j for j, r in enumerate(recs) if r["arm"] == "extreme"]
     print(f"{len(tech_i)} technique records, {len(extr_i)} extreme records")

@@ -170,9 +170,9 @@ def plot(records, X2, out: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", type=Path, default=Path("proofs.jsonl"))
+    ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
     ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument("--cache", type=Path, default=Path("embeddings.npy"))
+    ap.add_argument("--cache", type=Path, default=Path("embeddings_primes.npy"))
     ap.add_argument("--out", type=Path, default=Path("pilot_umap.png"))
     ap.add_argument("--knn", type=int, default=10)
     args = ap.parse_args()

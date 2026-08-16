@@ -5,4 +5,8 @@ proofs_sonnet5.jsonl
 proofs.backup.jsonl
 .batch_meta.json
 .batch_id
+.batch_meta_sqrt2.json
+.batch_id_sqrt2
 .venv/
+__pycache__/
+.DS_Store

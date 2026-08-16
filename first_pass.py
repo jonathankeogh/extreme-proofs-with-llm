@@ -1,7 +1,7 @@
 """
 Stage 2: first-pass analysis of the proof corpus.
 
-Reads proofs.jsonl and reports, in order:
+Reads proofs_primes.jsonl and reports, in order:
 
   0. integrity      record count, uniqueness, truncation, prompt homogeneity
   1. raw lengths    median characters per direction, pooled over languages
@@ -17,13 +17,16 @@ is what identifies it as a property of the script rather than of the proof.
 The effect is multiplicative, so section 3 works in log space, where a constant ratio
 becomes a constant offset and subtracting a per-language mean removes it.
 
-Baselines use all records in a language, both arms (n = 75 per language at
---samples 5), not just the extreme arm. The grid is balanced identically
-across languages, so no language gets an unfair baseline.
+Baselines use all records in a language from the technique and extreme arms
+(n = 75 per language on the primes corpus at --samples 5), not just the
+extreme arm. The grid is balanced identically across languages, so no
+language gets an unfair baseline. Scope-arm records, where present, are
+excluded from the baseline: they prove a different theorem, so their length
+is not a fact about language.
 
 Usage:
     python first_pass.py
-    python first_pass.py --corpus proofs.jsonl
+    python first_pass.py --corpus proofs_primes.jsonl
 """
 
 import argparse
@@ -112,9 +115,14 @@ def normalise(recs):
     # Since script density factor can affect sequence lengths which we do not want to confound the underlying proof structure, we 
     # get the log-length (since the factor is a mult) and standardise so that languages are apples to apples
     """Within-language z-score of log length. Mutates recs, returns cell means."""
+    # Baseline over the technique and extreme arms only. Scope-arm records
+    # prove different theorems at systematically different lengths, so
+    # including them would move the origin that the extreme arm is then
+    # measured against.
     by_lang = defaultdict(list)
     for r in recs:
-        by_lang[r["language"]].append(r["log_chars"])
+        if r["arm"] != "scope":
+            by_lang[r["language"]].append(r["log_chars"])
     mu = {k: st.mean(v) for k, v in by_lang.items()}
     sd = {k: st.stdev(v) for k, v in by_lang.items()}
     for r in recs:
@@ -187,7 +195,7 @@ def interactions(cell):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", type=Path, default=Path("proofs.jsonl"))
+    ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
     args = ap.parse_args()
 
     recs = load(args.corpus)

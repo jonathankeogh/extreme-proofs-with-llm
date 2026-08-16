@@ -1,7 +1,7 @@
 """
 Stage 2b: structural probes on the cached embeddings.
 
-Runs on embeddings.npy + proofs.jsonl. No re-embedding, no API calls, no
+Runs on embeddings_primes.npy + proofs_primes.jsonl. No re-embedding, no API calls, no
 model download -- seconds, not minutes.
 
   1. language_spectrum   How many dimensions does language actually occupy?
@@ -111,8 +111,8 @@ def centre_by_loo(X, recs, field):
     Plain centre_by forces each level mean to exactly zero, so a language
     probe on the result is guaranteed to collapse -- by construction, not by
     discovery. LOO removes that guarantee: the offset applied to a record is
-    estimated from the other 49 records in its language, so a probe that
-    still fails is failing on held-out information.
+    estimated from the other records at its level and never from itself, so
+    a probe that still fails is failing on held-out information.
     """
     Xc = X.copy()
     for lvl in {r[field] for r in recs}:
@@ -273,12 +273,13 @@ def centroid_agreement(X, recs):
 # ---------------------------------------------------------------- 6
 
 def hard_probe(X, recs, seed=0):
-    print("  Probe accuracy is uninformative at full dimension: 300 points")
-    print("  with five near-duplicates per cell are trivially separable in")
-    print("  1024 dimensions. Two ways to make the task honest.")
+    print(f"  Probe accuracy is uninformative at full dimension: "
+          f"{len(recs)} points")
+    print("  with several near-duplicates per cell are trivially separable")
+    print(f"  in {X.shape[1]} dimensions. Two ways to make the task honest.")
     rng = np.random.default_rng(seed)
 
-    print("\n  (a) after PCA, all 300 records")
+    print(f"\n  (a) after PCA, all {len(recs)} records")
     print(f"  {'dims':>5}  " + "  ".join(f"{f:>10}" for f in FACTORS))
     for d in (2, 5, 10, 20, 50):
         Xd = PCA(n_components=d, random_state=seed).fit_transform(X)
@@ -586,15 +587,21 @@ def extremal_ranking(X, recs):
     n_wrong = int((pred != y).sum())
     print(f"\n  technique probe errors: {n_wrong}/{len(y)}")
     if n_wrong == 0:
-        print("  None. The euler_product/euclid confusion seen on the")
-        print("  earlier 768-dim encoder does not reproduce here, which")
-        print("  points at that encoder rather than at corpus quality.")
+        print("  None. On the primes corpus this is the result that clears")
+        print("  the earlier 768-dim encoder's euler_product/euclid")
+        print("  confusion: it points at that encoder, not at the corpus.")
+    else:
+        pairs = Counter((sorted({r["technique"] for r in recs})[t],
+                         sorted({r["technique"] for r in recs})[p])
+                        for t, p in zip(y, pred) if t != p)
+        print("  Confusions (true -> predicted): " + ", ".join(
+            f"{a}->{b} {n}" for (a, b), n in pairs.most_common(5)))
 
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", type=Path, default=Path("proofs.jsonl"))
-    ap.add_argument("--cache", type=Path, default=Path("embeddings.npy"))
+    ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
+    ap.add_argument("--cache", type=Path, default=Path("embeddings_primes.npy"))
     ap.add_argument("--arm", default="technique")
     args = ap.parse_args()
 
