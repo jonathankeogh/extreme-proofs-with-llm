@@ -23,6 +23,13 @@ something:
   3. Length collinearity. If technique choice tracks length, it is the
      coordinate you already have wearing a hat.
 
+Section 8 runs the same classification on the scope arm, where present. The
+scope records are proofs of NEIGHBOURING statements, each sitting on a
+boundary where some of the known arguments stop working, so they are held
+out of every estimate here and only classified against the centroids. That
+is Conway and Shipman's scope test, run on the model instead of on the
+literature.
+
 Nothing here names a technique, a direction or a theorem: the labels come
 from the corpus, so the same script runs on any corpus generate_*.py emits.
 
@@ -48,16 +55,18 @@ def load(corpus: Path, cache: Path):
     X = np.load(cache)
     if len(X) != len(recs):
         raise SystemExit(f"{cache}: {len(X)} rows, {corpus}: {len(recs)}.")
-    # The scope arm proves different theorems. It must not reach the language
-    # means: those are the offset subtracted from every record here, and a
-    # different theorem shifts them for reasons that have nothing to do with
-    # language.
+    # The scope arm is held back rather than dropped. It must not reach the
+    # language means or the centroids -- those have to be estimated on
+    # proofs of ONE theorem, and a different statement would move them for
+    # reasons that have nothing to do with language. But being unfit to
+    # estimate from is not the same as being unfit to classify, and
+    # classifying it is the whole point of the arm: section 8 asks which
+    # known argument the model reaches for as the statement moves out of
+    # each proof's documented scope.
     keep = [i for i, r in enumerate(recs) if r.get("arm") != "scope"]
-    if len(keep) != len(recs):
-        print(f"dropped {len(recs) - len(keep)} scope-arm records "
-              f"(different theorems; not comparable to these centroids)")
-        recs, X = [recs[i] for i in keep], X[keep]
-    return recs, X
+    drop = [i for i, r in enumerate(recs) if r.get("arm") == "scope"]
+    return ([recs[i] for i in keep], X[keep],
+            [recs[i] for i in drop], X[drop])
 
 
 def language_means(recs, X, arm=None):
@@ -123,10 +132,11 @@ def main():
     ap.add_argument("--cache", type=Path, default=CACHE)
     args = ap.parse_args()
 
-    recs, X = load(args.corpus, args.cache)
+    recs, X, scope_recs, scope_X = load(args.corpus, args.cache)
     tech_i = [j for j, r in enumerate(recs) if r["arm"] == "technique"]
     extr_i = [j for j, r in enumerate(recs) if r["arm"] == "extreme"]
-    print(f"{len(tech_i)} technique records, {len(extr_i)} extreme records")
+    print(f"{len(tech_i)} technique records, {len(extr_i)} extreme records, "
+          f"{len(scope_recs)} scope records")
 
     mu = language_means(recs, X)
     T = centre(recs, X, mu, tech_i)
@@ -285,6 +295,50 @@ def main():
               f"threshold  (mean cos {np.mean([top[k] for k in ks]):+.3f})")
     print("  A direction with most records below threshold is not selecting")
     print("  a known technique -- it is leaving the reference set.")
+
+    if not scope_recs:
+        return
+
+    rule("8. The scope test")
+    print("  Conway and Shipman's criterion for two proofs being really")
+    print("  different is that they settle different sets of statements.")
+    print("  Each target below sits on a boundary where some of the known")
+    print("  arguments stop working. The centroids are estimated on this")
+    print("  theorem's technique arm and the language means on its two main")
+    print("  arms; the scope records are only classified against them,")
+    print("  never used to build them.")
+    print()
+    print("  Read it as a prediction test: as the statement moves out of a")
+    print("  proof's documented scope, that proof should stop being the one")
+    print("  the model produces, and the records should drift away from")
+    print("  every centroid.")
+
+    Sc = centre(scope_recs, scope_X, mu, range(len(scope_recs))) @ C.T
+    best_s = np.argmax(Sc, 1)
+    top_s = Sc[np.arange(len(Sc)), best_s]
+    order_s = np.argsort(-Sc, axis=1)
+    margin_s = (Sc[np.arange(len(Sc)), order_s[:, 0]]
+                - Sc[np.arange(len(Sc)), order_s[:, 1]])
+
+    print(f"\n  {'target':<24}{'n':>3}{'cos':>8}{'out':>7}   "
+          f"technique chosen")
+    for t in sorted({r["theorem"] for r in scope_recs}):
+        ks = [k for k, r in enumerate(scope_recs) if r["theorem"] == t]
+        c = Counter(techs[best_s[k]] for k in ks)
+        out = sum(top_s[k] < thr for k in ks)
+        share = ", ".join(f"{n}/{len(ks)} {a}" for a, n in c.most_common(3))
+        print(f"  {t:<24}{len(ks):>3}{np.mean([top_s[k] for k in ks]):>8.3f}"
+              f"{out:>4}/{len(ks)}   {share}")
+    print(f"\n  cos      mean cosine to the nearest technique centroid")
+    print(f"  out      records below the {thr:+.3f} out-of-set threshold "
+          f"from section 7")
+    print(f"  margin over second-best, pooled: mean {margin_s.mean():+.3f}")
+    print("\n  Two failure modes to check before reading anything into it.")
+    print("  A target where everything lands on one centroid with a tiny")
+    print("  margin is nearest-centroid having to choose, not the model")
+    print("  agreeing. And a target far outside every scope should show a")
+    print("  LOW cosine: if it does not, the centroids are measuring")
+    print("  subject matter rather than argument.")
 
 
 if __name__ == "__main__":

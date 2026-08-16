@@ -212,12 +212,26 @@ brevity/generality/visuality/machinery/surprise stay comparable across all
 three theorems, elementarity across primes and √2 only, and
 constructiveness not across theorems at all.
 
-### Why this does not disturb the numbers above
+### Where the scope arm is read
 
-The analysis scripts drop `arm == "scope"` before computing anything, so
-every figure reported above is unaffected by generating it. That was
-verified by diffing all four scripts' output before and after the change,
-not assumed.
+Held out of every *estimate* — language means, the within-language length
+baseline, the technique centroids. Those have to come from proofs of one
+theorem, and a ∛2 proof is not evidence about how Japanese renders a √2
+proof. Being unfit to estimate from is not the same as being unfit to
+classify, and classifying it is the point:
+
+- `extreme.py` §8 — the scope test. Each target is classified against the
+  technique centroids: which known argument does the model reach for as the
+  statement moves out of each proof's documented scope, and do the records
+  drift past the out-of-set threshold when it moves out of all of them.
+- `first_pass.py` §6 — the centre cell against each direction on the
+  normalised length scale. A direction is only extreme relative to what the
+  model writes unprompted, and that reference point did not exist before.
+- `coordinates.py` §6 — invoked results per target, testing whether
+  dependence climbs as the statement leaves the light arguments behind.
+
+Every figure reported above is unaffected by generating any of it, verified
+by diffing all four scripts' output before and after, not assumed.
 
 `coordinates.py` keeps one registry of named results per theorem, chosen
 from the corpus's own `theorem` field, and stops rather than falling back

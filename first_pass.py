@@ -33,7 +33,7 @@ import argparse
 import json
 import math
 import statistics as st
-from collections import defaultdict
+from collections import Counter, defaultdict
 from pathlib import Path
 
 # non-latin character languages
@@ -193,6 +193,37 @@ def interactions(cell):
               f"{gap:+7.2f}{flag}")
 
 
+def centre_cell(recs, cell):
+    """
+    The unprompted baseline: the corpus's own theorem, asked with no
+    selection criterion.
+
+    It is kept out of the section-3 baseline, because a baseline should be
+    estimated from the balanced grid rather than from a cell that is part of
+    what is being measured. But it is the origin every extremal direction is
+    supposed to be extreme RELATIVE TO, so it belongs on the same scale as
+    them, which is what this prints.
+    """
+    theorem = Counter(r["theorem"] for r in recs
+                      if r["arm"] != "scope").most_common(1)[0][0]
+    home = [r for r in recs
+            if r["arm"] == "scope" and r["theorem"] == theorem]
+    if not home:
+        return
+    rule("6. The centre cell: same theorem, no selection criterion")
+    z0 = st.mean([r["z"] for r in home])
+    print(f"  unprompted     n={len(home)}   mean z {z0:+.2f}")
+    print(f"  {'direction':14} {'mean z':>8} {'vs centre':>11}")
+    means = {d: st.mean([v for k, v in cell.items() if k[0] == d])
+             for d in sorted({k[0] for k in cell})}
+    for d in sorted(means, key=lambda x: means[x]):
+        print(f"  {d:14} {means[d]:+8.2f} {means[d] - z0:+11.2f}")
+    print("\n  The right-hand column is the one that means something: a")
+    print("  direction is only extreme relative to what the model writes")
+    print("  when nothing is being asked of it. A direction sitting at the")
+    print("  centre cell's length is not moving along this axis at all.")
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
@@ -205,6 +236,7 @@ def main():
     cell = normalise(recs)
     summary(cell)
     interactions(cell)
+    centre_cell(recs, cell)
 
     print("\nCaveat: character count is a proxy for proof length, but not a measure")
 
