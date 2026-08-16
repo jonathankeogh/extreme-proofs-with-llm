@@ -34,6 +34,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import anthropic
@@ -46,8 +47,8 @@ EFFORT = "medium"
 MAX_TOKENS = 32000
 
 OUT = Path("proofs_primes.jsonl")
-BATCH_ID_FILE = Path(".batch_id")
-META_FILE = Path(".batch_meta.json")
+BATCH_ID_FILE = Path(".batch_id_primes")
+META_FILE = Path(".batch_meta_primes.json")
 
 TECHNIQUES = {
     "euclid": "Euclid's classic argument: assume finitely many primes, "
@@ -305,6 +306,19 @@ def guard_output():
             break
 
 
+def describe_pending():
+    """Print what the pending batch actually contains, from its meta file."""
+    if not META_FILE.exists():
+        print(f"No {META_FILE}; nothing to collect.")
+        return
+    metas = json.loads(META_FILE.read_text())
+    arms = Counter(m["arm"] for m in metas.values())
+    print(f"Collecting a batch of {len(metas)} submitted requests: "
+          + ", ".join(f"{n} {a}" for a, n in sorted(arms.items())))
+    print("(--scope-arm has no effect here; batch contents were fixed at "
+          "submit time)")
+
+
 def load_done() -> set[str]:
     """ids already written to proofs_primes.jsonl."""
     if not OUT.exists():
@@ -403,15 +417,23 @@ def main():
     load_env()
     n_scope = args.scope_samples if args.scope_arm else 0
     grid = list(build_grid(args.samples, n_scope))
-    n_tech = len(TECHNIQUES) * len(LANGUAGES) * len(STYLES) * args.samples
-    n_ext = len(DIRECTIONS) * len(LANGUAGES) * args.samples
-    n_scp = len(SCOPE_TARGETS) * len(LANGUAGES) * n_scope
-    print(f"Grid: {len(grid)} proofs "
-          f"= {n_tech} technique arm + {n_ext} extreme arm "
-          f"+ {n_scp} scope arm "
-          f"(model={MODEL}, effort={EFFORT})")
-    if not args.scope_arm:
-        print("Scope arm omitted; pass --scope-arm to include it.")
+
+    if args.collect:
+        # The grid describes THIS invocation's flags, and they do not apply
+        # when collecting: the batch contents were fixed at submit time, so
+        # printing a grid here would claim the scope arm is absent from a
+        # batch that contains it. Report what is actually pending instead.
+        describe_pending()
+    else:
+        n_tech = len(TECHNIQUES) * len(LANGUAGES) * len(STYLES) * args.samples
+        n_ext = len(DIRECTIONS) * len(LANGUAGES) * args.samples
+        n_scp = len(SCOPE_TARGETS) * len(LANGUAGES) * n_scope
+        print(f"Grid: {len(grid)} proofs "
+              f"= {n_tech} technique arm + {n_ext} extreme arm "
+              f"+ {n_scp} scope arm "
+              f"(model={MODEL}, effort={EFFORT})")
+        if not args.scope_arm:
+            print("Scope arm omitted; pass --scope-arm to include it.")
 
     if args.dry_run:
         for g in grid:

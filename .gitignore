@@ -3,10 +3,13 @@
 secrets.env
 proofs_sonnet5.jsonl
 proofs.backup.jsonl
-.batch_meta.json
-.batch_id
+proofs_primes.backup.jsonl
+.batch_meta_primes.json
+.batch_id_primes
 .batch_meta_sqrt2.json
 .batch_id_sqrt2
+.batch_meta_pythagoras.json
+.batch_id_pythagoras
 .venv/
 __pycache__/
 .DS_Store

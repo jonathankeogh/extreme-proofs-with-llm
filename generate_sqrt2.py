@@ -90,6 +90,7 @@ import json
 import os
 import sys
 import time
+from collections import Counter
 from pathlib import Path
 
 import anthropic
@@ -360,6 +361,19 @@ def guard_output():
             break
 
 
+def describe_pending():
+    """Print what the pending batch actually contains, from its meta file."""
+    if not META_FILE.exists():
+        print(f"No {META_FILE}; nothing to collect.")
+        return
+    metas = json.loads(META_FILE.read_text())
+    arms = Counter(m["arm"] for m in metas.values())
+    print(f"Collecting a batch of {len(metas)} submitted requests: "
+          + ", ".join(f"{n} {a}" for a, n in sorted(arms.items())))
+    print("(--scope-arm has no effect here; batch contents were fixed at "
+          "submit time)")
+
+
 def load_done() -> set[str]:
     """ids already written to the corpus."""
     if not OUT.exists():
@@ -456,14 +470,22 @@ def main():
     load_env()
     n_scope = args.scope_samples if args.scope_arm else 0
     grid = list(build_grid(args.samples, n_scope))
-    n_tech = len(TECHNIQUES) * len(LANGUAGES) * len(STYLES) * args.samples
-    n_ext = len(DIRECTIONS) * len(LANGUAGES) * args.samples
-    n_scp = len(SCOPE_TARGETS) * len(LANGUAGES) * n_scope
-    print(f"Grid: {len(grid)} proofs = {n_tech} technique arm "
-          f"+ {n_ext} extreme arm + {n_scp} scope arm "
-          f"(model={MODEL}, effort={EFFORT}, max_tokens={MAX_TOKENS})")
-    if not args.scope_arm:
-        print("Scope arm omitted; pass --scope-arm to include it.")
+
+    if args.collect:
+        # The grid describes THIS invocation's flags, and they do not apply
+        # when collecting: the batch contents were fixed at submit time, so
+        # printing a grid here would claim the scope arm is absent from a
+        # batch that contains it. Report what is actually pending instead.
+        describe_pending()
+    else:
+        n_tech = len(TECHNIQUES) * len(LANGUAGES) * len(STYLES) * args.samples
+        n_ext = len(DIRECTIONS) * len(LANGUAGES) * args.samples
+        n_scp = len(SCOPE_TARGETS) * len(LANGUAGES) * n_scope
+        print(f"Grid: {len(grid)} proofs = {n_tech} technique arm "
+              f"+ {n_ext} extreme arm + {n_scp} scope arm "
+              f"(model={MODEL}, effort={EFFORT}, max_tokens={MAX_TOKENS})")
+        if not args.scope_arm:
+            print("Scope arm omitted; pass --scope-arm to include it.")
 
     if args.dry_run:
         for g in grid:
