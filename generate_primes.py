@@ -44,7 +44,7 @@ MODEL = "claude-opus-5"
 EFFORT = "medium"
 # Raised from 10000 after the first run truncated 28 records, 83% of them
 # in the generality direction. See the corpus note in README.md.
-MAX_TOKENS = 32000
+MAX_TOKENS = 64000
 
 OUT = Path("proofs_primes.jsonl")
 BATCH_ID_FILE = Path(".batch_id_primes")
@@ -78,7 +78,7 @@ DIRECTIONS = {
                "Do not sacrifice correctness or completeness for length, but "
                "subject to that, be as short as possible.",
     "elementarity": "Give the most elementary proof you can. Assume nothing "
-                    "beyond the definition of divisibility and basic "
+                    "beyond the basic definitions and elementary "
                     "arithmetic. Do not quote any named theorem.",
     "generality": "Give the proof that generalises furthest. Choose an "
                   "argument whose method extends to the widest class of "
@@ -89,6 +89,15 @@ DIRECTIONS = {
     "machinery": "Give the proof that quotes the heaviest machinery. Use the "
                  "most powerful named theorems available, even where lighter "
                  "tools would suffice.",
+    "surprise": "Give the most surprising proof you can. Prefer an argument "
+                "whose central idea comes from as far outside the statement "
+                "as possible.",
+    "constructiveness": "Give the most constructive proof you can. The "
+                        "argument should explicitly exhibit or construct "
+                        "the object it asserts -- a witness, a bound, or a "
+                        "procedure carried out step by step -- rather than "
+                        "only deriving a contradiction or verifying an "
+                        "identity.",
 }
 
 # Scope arm, added after the sqrt2 design showed what it buys. Conway and

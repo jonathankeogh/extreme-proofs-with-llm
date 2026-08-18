@@ -100,7 +100,7 @@ MODEL = "claude-opus-5"
 EFFORT = "medium"
 # 32000 throughout, matching the primes corpus after its cap was raised.
 # Starting here avoids repeating that run's truncations.
-MAX_TOKENS = 32000
+MAX_TOKENS = 64000
 
 THEOREM = "irrationality_of_sqrt2"
 STATEMENT = "there is no rational number whose square is 2"
@@ -163,7 +163,7 @@ DIRECTIONS = {
                "Do not sacrifice correctness or completeness for length, but "
                "subject to that, be as short as possible.",
     "elementarity": "Give the most elementary proof you can. Assume nothing "
-                    "beyond the definition of divisibility and basic "
+                    "beyond the basic definitions and elementary "
                     "arithmetic. Do not quote any named theorem.",
     "generality": "Give the proof that generalises furthest. Choose an "
                   "argument whose method extends to the widest class of "
@@ -177,11 +177,12 @@ DIRECTIONS = {
     "surprise": "Give the most surprising proof you can. Prefer an argument "
                 "whose central idea comes from as far outside the statement "
                 "as possible.",
-    "constructiveness": "Give the most constructive proof you can. From any "
-                        "supposed rational representation the argument should "
-                        "explicitly produce a witness -- a strictly simpler "
-                        "representation, or an explicit bound -- rather than "
-                        "only deriving a contradiction.",
+    "constructiveness": "Give the most constructive proof you can. The "
+                        "argument should explicitly exhibit or construct "
+                        "the object it asserts -- a witness, a bound, or a "
+                        "procedure carried out step by step -- rather than "
+                        "only deriving a contradiction or verifying an "
+                        "identity.",
 }
 
 # Scope arm. Each statement sits on a boundary that the article documents,

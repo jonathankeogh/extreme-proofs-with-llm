@@ -53,6 +53,8 @@ from sklearn.metrics import silhouette_score
 from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import LabelEncoder
 
+from paths import cache_for, ensure_dir
+
 # bge-m3 takes 8192 tokens. Short-context models (e.g. the 128-token
 # paraphrase-multilingual family) would truncate every proof to its opening
 # paragraph -- and since length correlates with direction, that truncation
@@ -86,7 +88,7 @@ def embed(records, model_name, cache: Path):
     X = model.encode([r["proof"] for r in records], show_progress_bar=True,
                      batch_size=8, normalize_embeddings=True)
     X = np.asarray(X)
-    np.save(cache, X)
+    np.save(ensure_dir(cache), X)
     return X
 
 
@@ -172,13 +174,16 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
     ap.add_argument("--model", default=DEFAULT_MODEL)
-    ap.add_argument("--cache", type=Path, default=Path("embeddings_primes.npy"))
+    ap.add_argument("--cache", type=Path, default=None,
+                    help="default: embeddings/<theorem>.npy, derived from "
+                         "--corpus")
     ap.add_argument("--out", type=Path, default=Path("pilot_umap.png"))
     ap.add_argument("--knn", type=int, default=10)
     args = ap.parse_args()
 
+    cache = args.cache or cache_for(args.corpus)
     recs = load_corpus(args.corpus)
-    X = embed(recs, args.model, args.cache)
+    X = embed(recs, args.model, cache)
 
     # Scoring uses the technique arm only: it is the labelled part.
     idx = [i for i, r in enumerate(recs) if r["arm"] == "technique"]

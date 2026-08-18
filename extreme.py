@@ -35,7 +35,7 @@ from the corpus, so the same script runs on any corpus generate_*.py emits.
 
 Usage:
     python extreme.py
-    python extreme.py --corpus proofs_sqrt2.jsonl --cache embeddings_sqrt2.npy
+    python extreme.py --corpus proofs_sqrt2.jsonl
 """
 
 import argparse
@@ -46,8 +46,9 @@ from pathlib import Path
 import numpy as np
 from scipy.stats import chi2_contingency, spearmanr
 
+from paths import cache_for
+
 CORPUS = Path("proofs_primes.jsonl")
-CACHE = Path("embeddings_primes.npy")
 
 
 def load(corpus: Path, cache: Path):
@@ -129,10 +130,13 @@ def rule(t):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", type=Path, default=CORPUS)
-    ap.add_argument("--cache", type=Path, default=CACHE)
+    ap.add_argument("--cache", type=Path, default=None,
+                    help="default: embeddings/<theorem>.npy, derived "
+                         "from --corpus")
     args = ap.parse_args()
 
-    recs, X, scope_recs, scope_X = load(args.corpus, args.cache)
+    recs, X, scope_recs, scope_X = load(
+        args.corpus, args.cache or cache_for(args.corpus))
     tech_i = [j for j, r in enumerate(recs) if r["arm"] == "technique"]
     extr_i = [j for j, r in enumerate(recs) if r["arm"] == "extreme"]
     print(f"{len(tech_i)} technique records, {len(extr_i)} extreme records, "

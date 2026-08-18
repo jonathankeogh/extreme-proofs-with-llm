@@ -1,7 +1,7 @@
 """
 Stage 2b: structural probes on the cached embeddings.
 
-Runs on embeddings_primes.npy + proofs_primes.jsonl. No re-embedding, no API calls, no
+Runs on embeddings/primes.npy + proofs_primes.jsonl. No re-embedding, no API calls, no
 model download -- seconds, not minutes.
 
   1. language_spectrum   How many dimensions does language actually occupy?
@@ -71,9 +71,19 @@ model download -- seconds, not minutes.
                          Explains what the machinery arm attaches to in
                          stage 3.
 
+ 14. masked_ablation     Every number above, recomputed on a corpus with the
+                         give-away terminology masked out (see mask.py), and
+                         printed beside the unmasked figure. Item 9 shows a
+                         bag of words nearly matching the encoder, which is
+                         consistent both with the encoder reading arguments
+                         and with it reading only vocabulary. This is the
+                         section that separates them. Runs only when
+                         --masked-cache is supplied.
+
 Usage:
     python probes.py
     python probes.py --arm technique --knn 10
+    python probes.py --masked-corpus proofs_primes.masked-both.jsonl
 """
 
 import argparse
@@ -87,6 +97,8 @@ from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
 from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.preprocessing import LabelEncoder
+
+from paths import cache_for
 
 FACTORS = ("technique", "language", "style")
 
@@ -598,14 +610,110 @@ def extremal_ranking(X, recs):
             f"{a}->{b} {n}" for (a, b), n in pairs.most_common(5)))
 
 
+# ---------------------------------------------------------------- 14
+
+def masked_ablation(X, recs, Xm, recs_m, arm="technique"):
+    """
+    The unmasked and masked spaces side by side.
+
+    mask.py writes the masked corpus in the same order as the original, so
+    the two embedding matrices are row-aligned and every statistic in this
+    file can be recomputed on both. Read the columns, not the absolute
+    numbers: what matters is how far each figure falls when the terminology
+    goes away.
+
+    How to read the technique probe row:
+
+      falls to chance      technique identity was terminology. The encoder
+                           was matching words, and the cross-language
+                           result in item 11 was proper-noun alignment.
+      holds up             something survives the vocabulary -- but check
+                           mask.py item 3 first. If the mask counts leak the
+                           label, the encoder may be reading the holes.
+      falls part way       the honest and most likely outcome. The drop is
+                           the lexical contribution; what is left is the
+                           ceiling on everything else.
+
+    The language probe is the control. Masking removes mathematical
+    terminology, not prose, so language should be largely unaffected. If the
+    language probe drops as much as the technique probe, the masking is
+    damaging the text in general rather than removing the label.
+    """
+    if len(Xm) != len(recs_m):
+        raise SystemExit(
+            f"masked cache has {len(Xm)} rows, masked corpus has "
+            f"{len(recs_m)}. Re-run the embedding step on the masked corpus.")
+    idx = [i for i, r in enumerate(recs_m) if r["arm"] == arm]
+    recs_m = [recs_m[i] for i in idx]
+    Xm = Xm[idx]
+    if len(recs_m) != len(recs):
+        raise SystemExit(
+            f"masked arm has {len(recs_m)} records, unmasked has "
+            f"{len(recs)}. mask.py preserves order and count; one of these "
+            f"corpora is not the other's mask.")
+    if [r["id"] for r in recs_m] != [r["id"] for r in recs]:
+        raise SystemExit(
+            "masked and unmasked records are not in the same order. "
+            "Row-by-row comparison would silently compare different proofs.")
+    tier = recs_m[0].get("mask_tier", "?")
+    print(f"  masking tier: {tier}")
+
+    print("\n  5-fold probe accuracy, raw space")
+    print(f"  {'factor':<12} {'unmasked':>10} {'masked':>10} {'drop':>8} "
+          f"{'chance':>8}")
+    for f in FACTORS:
+        y = LabelEncoder().fit_transform([r[f] for r in recs])
+        a = cross_val_score(LogisticRegression(max_iter=3000), X, y,
+                            cv=5).mean()
+        b = cross_val_score(LogisticRegression(max_iter=3000), Xm, y,
+                            cv=5).mean()
+        ch = 1 / len(set(y))
+        print(f"  {f:<12} {a:10.3f} {b:10.3f} {a - b:+8.3f} {ch:8.3f}")
+
+    print("\n  The same, with the task made hard (one record per cell)")
+    for label, M in (("unmasked", X), ("masked", Xm)):
+        print(f"  {label}:")
+        hard_probe(M, recs)
+
+    print("\n  Pairwise cosine gaps (language-centred)")
+    print(f"  {'factor':<12} {'unmasked':>10} {'masked':>10} {'drop':>8}")
+    XL, XmL = centre_by(X, recs, "language"), centre_by(Xm, recs, "language")
+    for f in FACTORS:
+        gaps = []
+        for M in (XL, XmL):
+            S = M @ M.T
+            iu = np.triu_indices(len(M), 1)
+            same = np.array([recs[i][f] == recs[j][f]
+                             for i, j in zip(*iu)])
+            gaps.append(S[iu][same].mean() - S[iu][~same].mean())
+        print(f"  {f:<12} {gaps[0]:10.3f} {gaps[1]:10.3f} "
+              f"{gaps[0] - gaps[1]:+8.3f}")
+
+    print("\n  Cross-lingual transfer on the masked space")
+    print("  Item 11 on the masked corpus. This is the sharpest single")
+    print("  number here: proper nouns and notation are the tokens that are")
+    print("  never translated, so if cross-lingual transfer was riding on")
+    print("  them, it collapses when they are gone.")
+    cross_lingual_transfer(Xm, recs)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
-    ap.add_argument("--cache", type=Path, default=Path("embeddings_primes.npy"))
+    ap.add_argument("--cache", type=Path, default=None,
+                    help="default: embeddings/<theorem>.npy, derived from "
+                         "--corpus")
     ap.add_argument("--arm", default="technique")
+    ap.add_argument("--masked-corpus", type=Path, default=None,
+                    help="corpus written by mask.py; item 14 derives its "
+                         "cache name the same way unless --masked-cache "
+                         "says otherwise")
+    ap.add_argument("--masked-cache", type=Path, default=None,
+                    help="embeddings of the masked corpus")
     args = ap.parse_args()
 
-    recs, X = load(args.corpus, args.cache, args.arm)
+    recs, X = load(args.corpus, args.cache or cache_for(args.corpus),
+                   args.arm)
     print(f"{len(recs)} records in the {args.arm} arm, "
           f"{X.shape[1]} dimensions")
     for f in FACTORS:
@@ -672,6 +780,22 @@ def main():
 
     rule("13. Extremal ranking of the techniques")
     extremal_ranking(X, recs)
+
+    if args.masked_corpus or args.masked_cache:
+        if not args.masked_corpus:
+            raise SystemExit("--masked-cache needs --masked-corpus too.")
+        mcache = args.masked_cache or cache_for(args.masked_corpus)
+        if not mcache.exists():
+            raise SystemExit(
+                f"{mcache} not found. Embed the masked corpus first:\n"
+                f"  python analyse.py --corpus {args.masked_corpus}")
+        rule("14. Masking ablation: is the technique signal lexical?")
+        recs_m = [json.loads(l) for l in args.masked_corpus.open()
+                  if l.strip()]
+        masked_ablation(X, recs, np.load(mcache), recs_m, args.arm)
+    else:
+        print("\n(14. masking ablation skipped; pass --masked-corpus. "
+              "See mask.py.)")
 
 
 if __name__ == "__main__":

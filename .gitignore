@@ -13,3 +13,7 @@ proofs_primes.backup.jsonl
 .venv/
 __pycache__/
 .DS_Store
+
+# Regenerable: mask.py output and its embeddings
+*.masked-*.jsonl
+embeddings/*_masked-*.npy

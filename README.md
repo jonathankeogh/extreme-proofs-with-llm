@@ -70,7 +70,7 @@ generate_pythagoras.py
                    proofs, 7 directions, a generalisation ladder for scope
 first_pass.py      integrity, raw and normalised lengths, direction vs
                    language separation, CJK × direction interactions
-analyse.py         embeds with bge-m3 → embeddings_primes.npy; pooled and
+analyse.py         embeds with bge-m3 → embeddings/<theorem>.npy; pooled and
                    leave-one-language-out probes, neighbourhood composition,
                    UMAP figures
 probes.py          structural probes: language/style/technique spectra,
@@ -83,19 +83,29 @@ extreme.py         classify the extreme arm against the technique centroids;
 coordinates.py     the non-lexical second coordinate: count of distinct
                    named external results invoked, with script-independence,
                    length-confound and machinery-vs-Fürstenberg tests
+paths.py           where the embedding caches live; the cache name is
+                   derived from the corpus name so the two cannot be
+                   mismatched
+mask.py            the masking ablation: rewrites a corpus with the
+                   technique-diagnostic vocabulary replaced by a neutral
+                   placeholder, so the embedding can be asked the same
+                   questions with the give-away words gone. Tiers from
+                   names-only to data-driven; --curve sweeps how much
+                   vocabulary has to go before the lexical baseline dies
 
 WRITEUP.md         the write-up
 
 proofs_primes.jsonl                     the corpus, 450 records
 proofs_primes.pre-generality-fix.jsonl  pre-fix corpus, kept as provenance
-embeddings_primes.npy                   bge-m3 embeddings (450 × 1024),
-                                        regenerable
+embeddings/primes.npy                   bge-m3 embeddings (558 × 1024),
+embeddings/sqrt2.npy                    regenerable; one cache per corpus,
+embeddings/pythagoras.npy               named by paths.py
 pilot_umap_raw.png
 pilot_umap_centred.png
 ```
 
 One corpus and one embedding cache per theorem, named alike:
-`proofs_<theorem>.jsonl` and `embeddings_<theorem>.npy`. They are kept
+`proofs_<theorem>.jsonl` and `embeddings/<theorem>.npy`. They are kept
 apart rather than pooled because the analysis estimates language means from
 the corpus it is given, and a Pythagoras proof is not evidence about how
 Chinese renders a proof about primes.
@@ -293,6 +303,95 @@ estimated on the technique arm remove language from the extreme arm. They do
 not — the probe sits at 0.487 against chance 0.167. The extreme-arm result
 therefore rests on the mapping being identical across all six languages,
 not on clean out-of-sample language removal.
+
+## Is the technique signal lexical?
+
+`probes.py` section 9 gives the number that raises the question: within
+English, TF-IDF word 1-2grams recover the technique at **0.940** against a
+chance of 0.200, where bge-m3 manages **0.980**. A bag of words comes within
+four points of the encoder. That is consistent with the encoder reading
+arguments *and* with it reading only vocabulary, and section 9 cannot tell
+the two apart.
+
+`mask.py` separates them by taking the vocabulary away. Three results, in
+the order they were found.
+
+**Named machinery is not the give-away.** Masking every entry in the
+`coordinates.py` registry, every mathematician's name in six languages, and
+every technique-diagnostic symbol moves the lexical baseline by *nothing* —
+0.940 before, 0.940 after. Only 1–7 terms per proof are affected and 212 of
+558 records contain no match at all. Whatever identifies a technique, it is
+not the citations.
+
+**It is the ordinary descriptive vocabulary, and it is diffuse.** Selecting
+terms by classifier weight instead (`--tier discriminative --curve`, terms
+chosen on terse records and tested on verbose, so the selection never sees
+the test side):
+
+| top-k masked | TF-IDF | text kept | example terms |
+|---|---|---|---|
+| 0 | 0.960 | 0.990 | (registry tiers only) |
+| 10 | 0.800 | 0.992 | mathcal, sum_, sqrt |
+| 25 | 0.640 | 0.984 | squarefree, subseteq, mathcal |
+| 100 | 0.400 | 0.943 | representation, squarefreeness, factorization |
+| 400 | **0.200** | 0.865 | longrightarrow, distributivity, representation |
+
+A slope, not a cliff. No small set of keywords carries the label; it takes
+roughly 400 word types before a bag of words is at chance, and 86% of the
+text is still on the page when it gets there. This is the ambiguous outcome
+and worth stating as such: an argument and the words used to state it are
+not separable in prose, so a gentle decay is as consistent with the encoder
+tracking the mathematics as with it tracking diffuse wording.
+
+**Are the hand-written lists any good?** `mask.py --audit` checks them
+against the corpus instead of asserting them, using the fact that the same
+mathematics is written six times: an entry that fires in every language at a
+similar rate is working, and one that fires in a single language is wrong in
+one of two opposite ways. It found both kinds.
+
+- *A collision.* `Tales` is Thales in Spanish and also the ordinary Spanish
+  word for "such". It took 24 hits in the Spanish primes proofs — `enteros m
+  tales que m² | n` — and not one was Thales. The mask was deleting a
+  function word. Fixed by requiring `Tales de Mileto`.
+- *A coverage gap.* On Pythagoras, `area_axioms` fires only in Chinese (剪拼)
+  and `trig_identity` only in English ("Pythagorean identity"). Both matches
+  are genuine; what is missing is the other five languages' phrasings. The
+  fix is to add forms, not remove one.
+
+The counts cannot tell those apart, so `--audit` prints an excerpt from each
+flagged entry and declines to give a verdict. An earlier version labelled all
+of them "likely false positives", which was wrong for two of the three.
+
+For the machinery tier this matters more on √2 and Pythagoras, whose
+registries `coordinates.py` marks provisional (`VALIDATED` holds only
+`infinitude_of_primes`). It matters least where it counts: the headline
+result uses the discriminative tier, which reads no list at all.
+
+**The hole does not leak.** Every masked term becomes the same placeholder,
+so the corpus does not record which term was removed. Classifying technique
+from what a reader of the masked text *can* see — placeholder count, length,
+density — sits at chance (0.200). An earlier version of this check used
+per-term counts and reported a leak of 0.90; that was the check classifying
+from its own mask log rather than from the proofs, and it is now restricted
+to observable features.
+
+The masked corpora are cut at the point where the lexical baseline is dead:
+`--topk 400` for primes and √2, `--topk 800` for Pythagoras, whose
+vocabulary is more redundant and still sits at 0.433 after 400.
+
+```bash
+uv run mask.py --corpus proofs_primes.jsonl --tier discriminative --topk 400
+uv run analyse.py --corpus proofs_primes.masked-discriminative.jsonl
+uv run probes.py --corpus proofs_primes.jsonl \
+    --masked-corpus proofs_primes.masked-discriminative.jsonl
+```
+
+That last command adds section 14, which reprints the probes on both spaces
+side by side. The open question it answers: on a corpus where TF-IDF is at
+chance, does bge-m3 still recover the technique? If it does, something
+beyond vocabulary is being represented. If it falls with the words, the
+technique geometry in this report is a lexical artefact — and the
+cross-lingual transfer in section 11 was proper-noun alignment.
 
 ## Caveats
 

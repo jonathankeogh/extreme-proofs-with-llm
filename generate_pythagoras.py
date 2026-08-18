@@ -83,7 +83,7 @@ import anthropic
 
 MODEL = "claude-opus-5"
 EFFORT = "medium"
-MAX_TOKENS = 32000
+MAX_TOKENS = 64000
 
 THEOREM = "pythagorean_theorem"
 STATEMENT = ("in a right triangle the square on the hypotenuse is equal to "
@@ -159,8 +159,8 @@ DIRECTIONS = {
                "Do not sacrifice correctness or completeness for length, but "
                "subject to that, be as short as possible.",
     "elementarity": "Give the most elementary proof you can. Assume nothing "
-                    "beyond lengths, areas, congruence and basic arithmetic. "
-                    "Do not quote any named theorem.",
+                    "beyond the basic definitions and elementary "
+                    "arithmetic. Do not quote any named theorem.",
     "generality": "Give the proof that generalises furthest. Choose an "
                   "argument whose method extends to the widest class of "
                   "other results.",
@@ -174,10 +174,11 @@ DIRECTIONS = {
                 "whose central idea comes from as far outside the statement "
                 "as possible.",
     "constructiveness": "Give the most constructive proof you can. The "
-                        "argument should exhibit an explicit construction -- "
-                        "pieces that could actually be cut out and "
-                        "reassembled, or a procedure carried out step by "
-                        "step -- rather than only verifying an identity.",
+                        "argument should explicitly exhibit or construct "
+                        "the object it asserts -- a witness, a bound, or a "
+                        "procedure carried out step by step -- rather than "
+                        "only deriving a contradiction or verifying an "
+                        "identity.",
 }
 
 # Scope ladder. Each rung removes a hypothesis the lighter proofs rely on.
