@@ -25,8 +25,8 @@ excluded from the baseline: they prove a different theorem, so their length
 is not a fact about language.
 
 Usage:
-    python first_pass.py
-    python first_pass.py --corpus proofs_primes.jsonl
+    python analysis/first_pass.py
+    python analysis/first_pass.py --corpus generate_proofs/proofs_primes.jsonl
 """
 
 import argparse
@@ -35,6 +35,8 @@ import math
 import statistics as st
 from collections import Counter, defaultdict
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
 
 # non-latin character languages
 CJK = {"ja", "zh"}
@@ -226,7 +228,7 @@ def centre_cell(recs, cell):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
+    ap.add_argument("--corpus", type=Path, default=ROOT / "generate_proofs" / "proofs_primes.jsonl")
     args = ap.parse_args()
 
     recs = load(args.corpus)

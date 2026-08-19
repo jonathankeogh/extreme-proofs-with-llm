@@ -34,8 +34,8 @@ Nothing here names a technique, a direction or a theorem: the labels come
 from the corpus, so the same script runs on any corpus generate_*.py emits.
 
 Usage:
-    python extreme.py
-    python extreme.py --corpus proofs_sqrt2.jsonl
+    python analysis/extreme.py
+    python analysis/extreme.py --corpus generate_proofs/proofs_sqrt2.jsonl
 """
 
 import argparse
@@ -48,7 +48,9 @@ from scipy.stats import chi2_contingency, spearmanr
 
 from paths import cache_for
 
-CORPUS = Path("proofs_primes.jsonl")
+ROOT = Path(__file__).resolve().parent.parent
+
+CORPUS = ROOT / "generate_proofs" / "proofs_primes.jsonl"
 
 
 def load(corpus: Path, cache: Path):

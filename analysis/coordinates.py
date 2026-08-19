@@ -46,9 +46,9 @@ primes corpus reports 0.85 invoked results where the right one reports
 16.63, which reads exactly like a null result and is not one.
 
 Usage:
-    python coordinates.py
-    python coordinates.py --show machinery   # print what was matched
-    python coordinates.py --corpus proofs_sqrt2.jsonl
+    python analysis/coordinates.py
+    python analysis/coordinates.py --show machinery   # print what was matched
+    python analysis/coordinates.py --corpus generate_proofs/proofs_sqrt2.jsonl
 """
 
 import argparse
@@ -59,7 +59,9 @@ import statistics as st
 from collections import Counter, defaultdict
 from pathlib import Path
 
-CORPUS = Path("proofs_primes.jsonl")
+ROOT = Path(__file__).resolve().parent.parent
+
+CORPUS = ROOT / "generate_proofs" / "proofs_primes.jsonl"
 CJK = {"ja", "zh"}
 
 # ----------------------------------------------------------------------

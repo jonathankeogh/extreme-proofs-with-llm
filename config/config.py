@@ -1,5 +1,7 @@
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent.parent
+
 MODEL = "claude-opus-5"
 EFFORT = "medium"
 
@@ -73,9 +75,9 @@ DIRECTIONS = {
 OPPOSED_PAIRS = [("elementarity", "machinery"), ("visuality", "nonvisuality")]
 
 CORPORA = {
-    "infinitude_of_primes": Path("proofs_primes.jsonl"),
-    "irrationality_of_sqrt2": Path("proofs_sqrt2.jsonl"),
-    "pythagorean_theorem": Path("proofs_pythagoras.jsonl"),
+    "infinitude_of_primes": ROOT / "generate_proofs" / "proofs_primes.jsonl",
+    "irrationality_of_sqrt2": ROOT / "generate_proofs" / "proofs_sqrt2.jsonl",
+    "pythagorean_theorem": ROOT / "generate_proofs" / "proofs_pythagoras.jsonl",
 }
 
 
@@ -118,4 +120,3 @@ if __name__ == "__main__":
     print(f"STYLES      {', '.join(STYLES)}")
     print(f"SAMPLES     {SAMPLES} technique/extreme, {SCOPE_SAMPLES} scope")
     print(f"DIRECTIONS  {len(DIRECTIONS)}: {', '.join(DIRECTIONS)}")
-    _report()

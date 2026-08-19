@@ -34,8 +34,8 @@ Reported, in order:
 
 Usage:
     pip install sentence-transformers umap-learn scikit-learn matplotlib
-    python analyse.py
-    python analyse.py --model intfloat/multilingual-e5-large
+    python analysis/analyse.py
+    python analysis/analyse.py --model intfloat/multilingual-e5-large
 """
 
 import argparse
@@ -54,6 +54,8 @@ from sklearn.model_selection import cross_val_score
 from sklearn.preprocessing import LabelEncoder
 
 from paths import cache_for, ensure_dir
+
+ROOT = Path(__file__).resolve().parent.parent
 
 # bge-m3 takes 8192 tokens. Short-context models (e.g. the 128-token
 # paraphrase-multilingual family) would truncate every proof to its opening
@@ -172,12 +174,12 @@ def plot(records, X2, out: Path):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
+    ap.add_argument("--corpus", type=Path, default=ROOT / "generate_proofs" / "proofs_primes.jsonl")
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--cache", type=Path, default=None,
                     help="default: embeddings/<theorem>.npy, derived from "
                          "--corpus")
-    ap.add_argument("--out", type=Path, default=Path("pilot_umap.png"))
+    ap.add_argument("--out", type=Path, default=ROOT / "umaps" / "pilot_umap.png")
     ap.add_argument("--knn", type=int, default=10)
     args = ap.parse_args()
 

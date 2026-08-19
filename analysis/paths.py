@@ -16,7 +16,9 @@ length. Deriving the name removes the possibility instead of detecting it.
 
 from pathlib import Path
 
-EMB_DIR = Path("embeddings")
+ROOT = Path(__file__).resolve().parent.parent
+
+EMB_DIR = ROOT / "embeddings"
 
 
 def cache_for(corpus: Path, suffix: str = "") -> Path:

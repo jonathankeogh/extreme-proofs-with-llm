@@ -70,11 +70,11 @@ Output: proofs_pythagoras.jsonl, same schema as the other corpora.
 Usage:
     export ANTHROPIC_API_KEY=sk-ant-...   # or put it in secrets.env
     uv sync
-    python generate_pythagoras.py --dry-run
-    python generate_pythagoras.py --submit
-    python generate_pythagoras.py --collect
+    python generate_proofs/generate_pythagoras.py --dry-run
+    python generate_proofs/generate_pythagoras.py --submit
+    python generate_proofs/generate_pythagoras.py --collect
 
-    python first_pass.py --corpus proofs_pythagoras.jsonl
+    python analysis/first_pass.py --corpus generate_proofs/proofs_pythagoras.jsonl
 """
 
 import argparse
@@ -88,6 +88,9 @@ from pathlib import Path
 
 import anthropic
 
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "config"))
+
 from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
                     SAMPLES, SCOPE_SAMPLES)
 
@@ -96,9 +99,9 @@ THEOREM = "pythagorean_theorem"
 STATEMENT = ("in a right triangle the square on the hypotenuse is equal to "
              "the sum of the squares on the other two sides")
 
-OUT = Path("proofs_pythagoras.jsonl")
-BATCH_ID_FILE = Path(".batch_id_pythagoras")
-META_FILE = Path(".batch_meta_pythagoras.json")
+OUT = ROOT / "generate_proofs" / "proofs_pythagoras.jsonl"
+BATCH_ID_FILE = ROOT / "config" / ".batch_id_pythagoras"
+META_FILE = ROOT / "config" / ".batch_meta_pythagoras.json"
 
 # Six proofs chosen to span the axes, not to sample the 371 evenly: two
 # pictures of different kinds (dissection vs Euclid's construction), two
@@ -224,7 +227,7 @@ Output only the proof itself. No title, no preamble, no closing remarks."""
 
 def load_env():
     """Read secrets.env if present."""
-    p = Path("secrets.env")
+    p = ROOT / "secrets.env"
     if p.exists():
         for line in p.read_text().splitlines():
             line = line.strip()

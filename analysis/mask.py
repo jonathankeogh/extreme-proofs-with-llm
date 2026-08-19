@@ -71,12 +71,12 @@ What this script cannot do, and reports instead of hiding:
      technique-dependent shortening would replace one confound with another.
 
 Usage:
-    python mask.py --corpus proofs_primes.jsonl --tier discriminative --curve
-    python mask.py --corpus proofs_primes.jsonl --tier discriminative --topk 400
-    python mask.py --corpus proofs_primes.jsonl --tier both --sample 1
+    python analysis/mask.py --corpus generate_proofs/proofs_primes.jsonl --tier discriminative --curve
+    python analysis/mask.py --corpus generate_proofs/proofs_primes.jsonl --tier discriminative --topk 400
+    python analysis/mask.py --corpus generate_proofs/proofs_primes.jsonl --tier both --sample 1
 
 Writes proofs_primes.masked-<tier>.jsonl, then embed that as usual:
-    python analyse.py --corpus proofs_primes.masked-discriminative.jsonl
+    python analysis/analyse.py --corpus generate_proofs/proofs_primes.masked-discriminative.jsonl
 """
 
 import argparse
@@ -93,6 +93,8 @@ from sklearn.preprocessing import LabelEncoder
 
 from coordinates import compile_forms, select_registry
 from paths import cache_for
+
+ROOT = Path(__file__).resolve().parent.parent
 
 PLACEHOLDER = "⟨m⟩"
 
@@ -637,7 +639,7 @@ def rule(t):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--corpus", type=Path,
-                    default=Path("proofs_primes.jsonl"))
+                    default=ROOT / "generate_proofs" / "proofs_primes.jsonl")
     ap.add_argument("--tier", default="both", choices=sorted(TIERS))
     ap.add_argument("--theorem", default=None,
                     help="override the registry choice; normally taken "
@@ -728,8 +730,8 @@ def main():
     print(f"\nWrote {out} ({len(recs)} records, same order as the input).")
     print(f"Its embedding cache will be {cache_for(out)}.")
     print("Embed it, then compare the two spaces:")
-    print(f"  python analyse.py --corpus {out}")
-    print(f"  python probes.py --corpus {args.corpus} --masked-corpus {out}")
+    print(f"  python analysis/analyse.py --corpus {out}")
+    print(f"  python analysis/probes.py --corpus {args.corpus} --masked-corpus {out}")
 
 
 if __name__ == "__main__":

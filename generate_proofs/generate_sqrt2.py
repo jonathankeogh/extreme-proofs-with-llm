@@ -84,11 +84,11 @@ for.
 Usage:
     export ANTHROPIC_API_KEY=sk-ant-...   # or put it in secrets.env
     uv sync
-    python generate_sqrt2.py --dry-run    # print the grid, no API calls
-    python generate_sqrt2.py --submit     # submit the batch, print batch id
-    python generate_sqrt2.py --collect    # poll and write proofs_sqrt2.jsonl
+    python generate_proofs/generate_sqrt2.py --dry-run    # print the grid, no API calls
+    python generate_proofs/generate_sqrt2.py --submit     # submit the batch, print batch id
+    python generate_proofs/generate_sqrt2.py --collect    # poll and write generate_proofs/proofs_sqrt2.jsonl
 
-    python first_pass.py --corpus proofs_sqrt2.jsonl
+    python analysis/first_pass.py --corpus generate_proofs/proofs_sqrt2.jsonl
 """
 
 import argparse
@@ -102,6 +102,9 @@ from pathlib import Path
 
 import anthropic
 
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "config"))
+
 from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
                     SAMPLES, SCOPE_SAMPLES)
 
@@ -109,10 +112,10 @@ from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
 THEOREM = "irrationality_of_sqrt2"
 STATEMENT = "there is no rational number whose square is 2"
 
-OUT = Path("proofs_sqrt2.jsonl")
+OUT = ROOT / "generate_proofs" / "proofs_sqrt2.jsonl"
 # Distinct from the primes generator's, so the two can be in flight at once.
-BATCH_ID_FILE = Path(".batch_id_sqrt2")
-META_FILE = Path(".batch_meta_sqrt2.json")
+BATCH_ID_FILE = ROOT / "config" / ".batch_id_sqrt2"
+META_FILE = ROOT / "config" / ".batch_meta_sqrt2.json"
 
 # The six proofs of Conway and Shipman (Math. Intelligencer 35(3), 2013),
 # minus Bashmakova's; see the header. Ordered as in the article, which is
@@ -227,7 +230,7 @@ Output only the proof itself. No title, no preamble, no closing remarks."""
 
 def load_env():
     """Read secrets.env if present."""
-    p = Path("secrets.env")
+    p = ROOT / "secrets.env"
     if p.exists():
         for line in p.read_text().splitlines():
             line = line.strip()

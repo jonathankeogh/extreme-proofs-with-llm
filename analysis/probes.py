@@ -81,9 +81,9 @@ model download -- seconds, not minutes.
                          --masked-cache is supplied.
 
 Usage:
-    python probes.py
-    python probes.py --arm technique --knn 10
-    python probes.py --masked-corpus proofs_primes.masked-both.jsonl
+    python analysis/probes.py
+    python analysis/probes.py --arm technique --knn 10
+    python analysis/probes.py --masked-corpus generate_proofs/proofs_primes.masked-both.jsonl
 """
 
 import argparse
@@ -99,6 +99,8 @@ from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.preprocessing import LabelEncoder
 
 from paths import cache_for
+
+ROOT = Path(__file__).resolve().parent.parent
 
 FACTORS = ("technique", "language", "style")
 
@@ -699,7 +701,7 @@ def masked_ablation(X, recs, Xm, recs_m, arm="technique"):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--corpus", type=Path, default=Path("proofs_primes.jsonl"))
+    ap.add_argument("--corpus", type=Path, default=ROOT / "generate_proofs" / "proofs_primes.jsonl")
     ap.add_argument("--cache", type=Path, default=None,
                     help="default: embeddings/<theorem>.npy, derived from "
                          "--corpus")
@@ -788,7 +790,7 @@ def main():
         if not mcache.exists():
             raise SystemExit(
                 f"{mcache} not found. Embed the masked corpus first:\n"
-                f"  python analyse.py --corpus {args.masked_corpus}")
+                f"  python analysis/analyse.py --corpus {args.masked_corpus}")
         rule("14. Masking ablation: is the technique signal lexical?")
         recs_m = [json.loads(l) for l in args.masked_corpus.open()
                   if l.strip()]

@@ -16,8 +16,8 @@ Deliberately NOT driven by a hand-maintained list of what changed. The
 comparison is the whole test: it catches wordings I forgot I edited, and it
 reports nothing when nothing changed.
 
-    uv run prune.py              # report only, touches nothing
-    uv run prune.py --apply      # back up, then rewrite without the stale
+    uv run analysis/prune.py              # report only, touches nothing
+    uv run analysis/prune.py --apply      # back up, then rewrite without the stale
 
 Backups go to <corpus>.stale-<timestamp>.jsonl, so a wrong call here is
 recoverable without an API spend.
@@ -30,6 +30,10 @@ import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "config"))
+sys.path.insert(0, str(ROOT / "generate_proofs"))
 
 import config
 
@@ -86,7 +90,7 @@ def main():
             print(f"  STALE  {k:34} {n:4}")
 
         if args.apply:
-            backup = path.with_suffix(f".stale-{stamp}.jsonl")
+            backup = ROOT / ".backups" / f"{path.stem}.stale-{stamp}.jsonl"
             shutil.copy(path, backup)
             with path.open("w") as f:
                 for rec in fresh:

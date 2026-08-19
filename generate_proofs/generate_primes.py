@@ -32,9 +32,9 @@ Output: proofs_primes.jsonl (ie one JSON object per proof, with metadata and usa
 Usage:
     export ANTHROPIC_API_KEY=sk-ant-...   # or put it in secrets.env
     uv sync
-    python generate_primes.py --dry-run   # print the grid that is going to be called, but does no API calls
-    python generate_primes.py --submit    # submit the batch, print batch id
-    python generate_primes.py --collect   # poll and write proofs_primes.jsonl
+    python generate_proofs/generate_primes.py --dry-run   # print the grid that is going to be called, but does no API calls
+    python generate_proofs/generate_primes.py --submit    # submit the batch, print batch id
+    python generate_proofs/generate_primes.py --collect   # poll and write generate_proofs/proofs_primes.jsonl
 """
 
 import argparse
@@ -48,6 +48,9 @@ from pathlib import Path
 
 import anthropic
 
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "config"))
+
 from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
                     SAMPLES, SCOPE_SAMPLES)
 
@@ -55,9 +58,9 @@ from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
 THEOREM = "infinitude_of_primes"
 STATEMENT = "there are infinitely many prime numbers"
 
-OUT = Path("proofs_primes.jsonl")
-BATCH_ID_FILE = Path(".batch_id_primes")
-META_FILE = Path(".batch_meta_primes.json")
+OUT = ROOT / "generate_proofs" / "proofs_primes.jsonl"
+BATCH_ID_FILE = ROOT / "config" / ".batch_id_primes"
+META_FILE = ROOT / "config" / ".batch_meta_primes.json"
 
 TECHNIQUES = {
     "euclid": "Euclid's classic argument: assume finitely many primes, "
@@ -158,7 +161,7 @@ Output only the proof itself. No title, no preamble, no closing remarks."""
 
 def load_env():
     """Read secrets.env if present"""
-    p = Path("secrets.env")
+    p = ROOT / "secrets.env"
     if p.exists():
         for line in p.read_text().splitlines():
             line = line.strip()
