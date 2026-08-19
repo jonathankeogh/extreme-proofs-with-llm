@@ -120,3 +120,4 @@ if __name__ == "__main__":
     print(f"STYLES      {', '.join(STYLES)}")
     print(f"SAMPLES     {SAMPLES} technique/extreme, {SCOPE_SAMPLES} scope")
     print(f"DIRECTIONS  {len(DIRECTIONS)}: {', '.join(DIRECTIONS)}")
+    print("CORPORA: \n")
