@@ -9,8 +9,8 @@ wrote about: there is no rational number whose square is 2.
     technique arm  6 techniques x 6 languages x 2 styles x N samples
                    -> 360 at N=5. Known proofs, prescribed. The instrument.
 
-    extreme arm    7 directions x 6 languages x N samples
-                   -> 210 at N=5. Technique not prescribed; each direction
+    extreme arm    8 directions x 6 languages x N samples
+                   -> 240 at N=5. Technique not prescribed; each direction
                    asks for a vertex.
 
     scope arm      7 statements x 6 languages x M samples  (--scope-arm)
@@ -48,12 +48,13 @@ Design decisions, so they are auditable rather than inferred:
     Traditional proof". Prescribing it would put two labels on one argument
     and measure the labelling, not the model.
 
-  * The first five directions are byte-identical to the ones in
-    generate_primes.py. They never name the theorem, so they did not need
-    adapting, and keeping them identical means any difference between the
-    two corpora cannot be a difference in prompt wording. `surprise` and
-    `constructiveness` are new, and are two more of the values Conway and
-    Shipman list in their opening paragraph.
+  * All eight directions come from config.py, so they are byte-identical
+    across the three generators by construction rather than by discipline.
+    None of them names a theorem, which is what makes that possible: a
+    direction that had to be adapted per theorem would measure the
+    adaptation. The eight cover all seven values Conway and Shipman list in
+    their opening paragraph, plus `machinery` as this project's inverse of
+    elementarity.
 
   * No direction prompt asks the model to state its proof's scope, however
     tempting that is here. The primes run truncated 28 records because the
@@ -68,6 +69,12 @@ Design decisions, so they are auditable rather than inferred:
     extremal direction should be measured against. generate_primes.py now
     carries the same arm, added afterwards, so both theorems are analysed
     on the same footing.
+
+Every invariant constant -- model, effort, token cap, languages, styles,
+sample counts, and the extremal DIRECTIONS -- lives in config.py and is
+imported, not restated. That is the only way the three corpora stay
+comparable: a direction whose wording drifts between generators measures
+the wording, not the direction.
 
 Output: proofs_sqrt2.jsonl, one JSON object per proof, same schema as
 proofs_primes.jsonl. Scope-arm records carry arm="scope" and a varying `theorem`;
@@ -95,12 +102,9 @@ from pathlib import Path
 
 import anthropic
 
+from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
+                    SAMPLES, SCOPE_SAMPLES)
 
-MODEL = "claude-opus-5"
-EFFORT = "medium"
-# 32000 throughout, matching the primes corpus after its cap was raised.
-# Starting here avoids repeating that run's truncations.
-MAX_TOKENS = 64000
 
 THEOREM = "irrationality_of_sqrt2"
 STATEMENT = "there is no rational number whose square is 2"
@@ -158,32 +162,6 @@ TECHNIQUES = {
 # generality, constructiveness, visuality, nonvisuality, surprise,
 # elementarity"); the article tags the analytic proof "surprising", and
 # descent is the constructive pole against unique factorisation.
-DIRECTIONS = {
-    "brevity": "Give the shortest proof you can. Minimise total length. "
-               "Do not sacrifice correctness or completeness for length, but "
-               "subject to that, be as short as possible.",
-    "elementarity": "Give the most elementary proof you can. Assume nothing "
-                    "beyond the basic definitions and elementary "
-                    "arithmetic. Do not quote any named theorem.",
-    "generality": "Give the proof that generalises furthest. Choose an "
-                  "argument whose method extends to the widest class of "
-                  "other results.",
-    "visuality": "Give the most visual or geometric proof you can. The "
-                 "argument should be describable as a picture or a "
-                 "construction rather than a symbolic manipulation.",
-    "machinery": "Give the proof that quotes the heaviest machinery. Use the "
-                 "most powerful named theorems available, even where lighter "
-                 "tools would suffice.",
-    "surprise": "Give the most surprising proof you can. Prefer an argument "
-                "whose central idea comes from as far outside the statement "
-                "as possible.",
-    "constructiveness": "Give the most constructive proof you can. The "
-                        "argument should explicitly exhibit or construct "
-                        "the object it asserts -- a witness, a bound, or a "
-                        "procedure carried out step by step -- rather than "
-                        "only deriving a contradiction or verifying an "
-                        "identity.",
-}
 
 # Scope arm. Each statement sits on a boundary that the article documents,
 # so which method the model produces is checkable against a known answer.
@@ -214,23 +192,7 @@ SCOPE_THEOREM = {t: (THEOREM if t == "sqrt2" else f"irrationality_of_{t}")
                  for t in SCOPE_TARGETS}
 SCOPE_BY_THEOREM = {v: k for k, v in SCOPE_THEOREM.items()}
 
-LANGUAGES = {
-    "en": "English",
-    "fr": "French",
-    "de": "German",
-    "es": "Spanish",
-    "zh": "Chinese",
-    "ja": "Japanese",
-}
 
-STYLES = {
-    "terse": "Write in a terse, austere style: minimal prose, heavy use of "
-             "notation, no motivation or commentary, like a research "
-             "monograph.",
-    "verbose": "Write in an expansive, pedagogical style: motivate each step, "
-               "explain the idea behind the argument in words, as if for an "
-               "undergraduate seeing it for the first time.",
-}
 
 TECHNIQUE_TEMPLATE = """Write a complete, correct, self-contained proof that {statement}.
 
@@ -456,12 +418,12 @@ def collect(client, batch_id: str, poll_seconds: int = 60):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--samples", type=int, default=5,
+    ap.add_argument("--samples", type=int, default=SAMPLES,
                     help="samples per cell in the technique and extreme arms "
                          "(default 5 -> 570 proofs)")
     ap.add_argument("--scope-arm", action="store_true",
                     help="also generate the scope arm (off by default)")
-    ap.add_argument("--scope-samples", type=int, default=3,
+    ap.add_argument("--scope-samples", type=int, default=SCOPE_SAMPLES,
                     help="samples per cell in the scope arm (default 3)")
     ap.add_argument("--submit", action="store_true")
     ap.add_argument("--collect", action="store_true")

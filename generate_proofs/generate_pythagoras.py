@@ -8,8 +8,9 @@ language crossed throughout, plus the centre cell and the scope ladder.
     technique arm  6 techniques x 6 languages x 2 styles x N samples
                    -> 360 at N=5.
 
-    extreme arm    7 directions x 6 languages x N samples
-                   -> 210 at N=5. Same seven as generate_sqrt2.py.
+    extreme arm    8 directions x 6 languages x N samples
+                   -> 240 at N=5. The eight of config.py, as for the other
+                   two theorems.
 
     scope arm      6 statements x 6 languages x M samples  (--scope-arm)
                    -> 108 at M=3. Off by default.
@@ -49,13 +50,20 @@ Two warnings specific to this theorem, both real:
 
 Design decisions, matching the other two generators:
 
-  * The first five directions are byte-identical to generate_primes.py and
-    generate_sqrt2.py, so a difference across the three corpora cannot be a
-    difference in prompt wording. surprise and constructiveness are the two
-    added in generate_sqrt2.py.
+  * All eight directions are imported from config.py, so a difference
+    across the three corpora cannot be a difference in prompt wording.
+    Two of them USED to be theorem-specific here -- see the note below the
+    imports -- and the records generated from those older wordings have
+    been regenerated.
 
   * No prompt asks the model to describe its own proof's scope; the scope
     arm measures that by behaviour. See generate_sqrt2.py for why.
+
+Every invariant constant -- model, effort, token cap, languages, styles,
+sample counts, and the extremal DIRECTIONS -- lives in config.py and is
+imported, not restated. That is the only way the three corpora stay
+comparable: a direction whose wording drifts between generators measures
+the wording, not the direction.
 
 Output: proofs_pythagoras.jsonl, same schema as the other corpora.
 
@@ -80,10 +88,9 @@ from pathlib import Path
 
 import anthropic
 
+from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
+                    SAMPLES, SCOPE_SAMPLES)
 
-MODEL = "claude-opus-5"
-EFFORT = "medium"
-MAX_TOKENS = 64000
 
 THEOREM = "pythagorean_theorem"
 STATEMENT = ("in a right triangle the square on the hypotenuse is equal to "
@@ -130,56 +137,28 @@ TECHNIQUES = {
                      "vanish, leaving ||x + y||^2 = ||x||^2 + ||y||^2.",
 }
 
-# Five of these are byte-identical to generate_primes.py and
-# generate_sqrt2.py: brevity, generality, visuality, machinery, surprise.
-# They never name a theorem, so they carry over untouched and a difference
-# between the three corpora on those five cannot be a wording difference.
+# HISTORICAL NOTE, kept because it explains 60 regenerated records.
 #
-# TWO HAD TO CHANGE, and pretending otherwise would have quietly broken the
-# arm:
+# This file once carried its own DIRECTIONS dict in which two entries were
+# theorem-specific:
 #
-#   elementarity      the shared text reads "assume nothing beyond the
-#                     definition of divisibility and basic arithmetic".
-#                     Divisibility is the right floor for primes and for
-#                     sqrt2, and it is irrelevant to a statement about
-#                     areas. Replaced with the geometric floor.
+#   elementarity      read "assume nothing beyond lengths, areas, congruence
+#                     and basic arithmetic", against "beyond the definition
+#                     of divisibility and basic arithmetic" in the other two
+#                     generators. Each floor was right for its own theorem
+#                     and wrong as a shared axis.
 #
-#   constructiveness  the shared text asks the proof to produce "a strictly
-#                     simpler representation" from "any supposed rational
-#                     representation" -- that is the sqrt2 descent, and it
-#                     is meaningless here. Replaced with the constructive
-#                     pole that this theorem actually has: an explicit
-#                     dissection.
+#   constructiveness  asked for "pieces that could actually be cut out and
+#                     reassembled", which presupposes a dissection, just as
+#                     the sqrt2 wording presupposed a descent on rationals.
+#                     The prompt was choosing the proof, not measuring a
+#                     direction.
 #
-# So brevity/generality/visuality/machinery/surprise are comparable across
-# all three theorems; elementarity is comparable between primes and sqrt2
-# only; constructiveness is not comparable across theorems at all.
-DIRECTIONS = {
-    "brevity": "Give the shortest proof you can. Minimise total length. "
-               "Do not sacrifice correctness or completeness for length, but "
-               "subject to that, be as short as possible.",
-    "elementarity": "Give the most elementary proof you can. Assume nothing "
-                    "beyond the basic definitions and elementary "
-                    "arithmetic. Do not quote any named theorem.",
-    "generality": "Give the proof that generalises furthest. Choose an "
-                  "argument whose method extends to the widest class of "
-                  "other results.",
-    "visuality": "Give the most visual or geometric proof you can. The "
-                 "argument should be describable as a picture or a "
-                 "construction rather than a symbolic manipulation.",
-    "machinery": "Give the proof that quotes the heaviest machinery. Use the "
-                 "most powerful named theorems available, even where lighter "
-                 "tools would suffice.",
-    "surprise": "Give the most surprising proof you can. Prefer an argument "
-                "whose central idea comes from as far outside the statement "
-                "as possible.",
-    "constructiveness": "Give the most constructive proof you can. The "
-                        "argument should explicitly exhibit or construct "
-                        "the object it asserts -- a witness, a bound, or a "
-                        "procedure carried out step by step -- rather than "
-                        "only deriving a contradiction or verifying an "
-                        "identity.",
-}
+# Both now come from config.py in theorem-neutral wording, which cost 60
+# records here and 90 across the three corpora. The alternative was a
+# corpus in which `elementarity` and `constructiveness` could not be
+# compared across theorems at all -- which is what the earlier version of
+# this comment correctly warned about.
 
 # Scope ladder. Each rung removes a hypothesis the lighter proofs rely on.
 SCOPE_TARGETS = {
@@ -212,23 +191,7 @@ SCOPE_THEOREM = {t: (THEOREM if t == "pythagoras" else t)
                  for t in SCOPE_TARGETS}
 SCOPE_BY_THEOREM = {v: k for k, v in SCOPE_THEOREM.items()}
 
-LANGUAGES = {
-    "en": "English",
-    "fr": "French",
-    "de": "German",
-    "es": "Spanish",
-    "zh": "Chinese",
-    "ja": "Japanese",
-}
 
-STYLES = {
-    "terse": "Write in a terse, austere style: minimal prose, heavy use of "
-             "notation, no motivation or commentary, like a research "
-             "monograph.",
-    "verbose": "Write in an expansive, pedagogical style: motivate each step, "
-               "explain the idea behind the argument in words, as if for an "
-               "undergraduate seeing it for the first time.",
-}
 
 TECHNIQUE_TEMPLATE = """Write a complete, correct, self-contained proof that {statement}.
 
@@ -453,12 +416,12 @@ def collect(client, batch_id: str, poll_seconds: int = 60):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--samples", type=int, default=5,
+    ap.add_argument("--samples", type=int, default=SAMPLES,
                     help="samples per cell in the technique and extreme arms "
                          "(default 5 -> 570 proofs)")
     ap.add_argument("--scope-arm", action="store_true",
                     help="also generate the scope arm and the centre cell")
-    ap.add_argument("--scope-samples", type=int, default=3,
+    ap.add_argument("--scope-samples", type=int, default=SCOPE_SAMPLES,
                     help="samples per cell in the scope arm (default 3)")
     ap.add_argument("--submit", action="store_true")
     ap.add_argument("--collect", action="store_true")

@@ -8,12 +8,21 @@ Two types that are both over the same 6 languages, which keeps the spirit of Con
                  prescribed. Used to measure within-technique variation and
                  to test whether language behaves as a factor.
 
-  extreme arm    5 directions x 6 languages x N samples
-                 -> 150 at N=5.  Technique here is not prescribed. Each direction
-                 asks the model to maximise one attribute (brevity,
-                 elementarity, generality, visuality, machinery). The idea here is these may be the vertices of the hull
+  extreme arm    8 directions x 6 languages x N samples
+                 -> 240 at N=5.  Technique here is not prescribed. Each
+                 direction asks the model to maximise one attribute. The idea
+                 here is these may be the vertices of the hull.
 
-Total at N=5: 450 proofs
+  scope arm      6 statements x 6 languages x M samples  (--scope-arm)
+                 -> 108 at M=3. No selection criterion at all.
+
+Total at N=5, M=3: 648 proofs
+
+Every invariant constant -- model, effort, token cap, languages, styles,
+sample counts, and the extremal DIRECTIONS -- lives in config.py and is
+imported, not restated. That is the only way the three corpora stay
+comparable: a direction whose wording drifts between generators measures
+the wording, not the direction.
 
 Note we are sticking with one model, Opus 5 Medium. This is because we don't want model to be a factor, and Opus 5 is better at instruction following
 for things like "the most elementary proof"
@@ -39,12 +48,12 @@ from pathlib import Path
 
 import anthropic
 
+from config import (MODEL, EFFORT, MAX_TOKENS, LANGUAGES, STYLES, DIRECTIONS,
+                    SAMPLES, SCOPE_SAMPLES)
 
-MODEL = "claude-opus-5"
-EFFORT = "medium"
-# Raised from 10000 after the first run truncated 28 records, 83% of them
-# in the generality direction. See the corpus note in README.md.
-MAX_TOKENS = 64000
+
+THEOREM = "infinitude_of_primes"
+STATEMENT = "there are infinitely many prime numbers"
 
 OUT = Path("proofs_primes.jsonl")
 BATCH_ID_FILE = Path(".batch_id_primes")
@@ -71,34 +80,6 @@ TECHNIQUES = {
                       "coprime, so each contributes at least one new prime.",
 }
 
-# Extremal directions. The idea is that for the opposed pair elementarity vs
-# machinery the hull will have some width along at least one axis
-DIRECTIONS = {
-    "brevity": "Give the shortest proof you can. Minimise total length. "
-               "Do not sacrifice correctness or completeness for length, but "
-               "subject to that, be as short as possible.",
-    "elementarity": "Give the most elementary proof you can. Assume nothing "
-                    "beyond the basic definitions and elementary "
-                    "arithmetic. Do not quote any named theorem.",
-    "generality": "Give the proof that generalises furthest. Choose an "
-                  "argument whose method extends to the widest class of "
-                  "other results.",
-    "visuality": "Give the most visual or geometric proof you can. The "
-                 "argument should be describable as a picture or a "
-                 "construction rather than a symbolic manipulation.",
-    "machinery": "Give the proof that quotes the heaviest machinery. Use the "
-                 "most powerful named theorems available, even where lighter "
-                 "tools would suffice.",
-    "surprise": "Give the most surprising proof you can. Prefer an argument "
-                "whose central idea comes from as far outside the statement "
-                "as possible.",
-    "constructiveness": "Give the most constructive proof you can. The "
-                        "argument should explicitly exhibit or construct "
-                        "the object it asserts -- a witness, a bound, or a "
-                        "procedure carried out step by step -- rather than "
-                        "only deriving a contradiction or verifying an "
-                        "identity.",
-}
 
 # Scope arm, added after the sqrt2 design showed what it buys. Conway and
 # Shipman's test for whether two proofs are really different is whether they
@@ -138,29 +119,13 @@ SCOPE_TARGETS = {
 
 # The centre cell proves the corpus's own theorem, so it carries the corpus's
 # own theorem name; the rest name themselves.
-SCOPE_THEOREM = {t: ("infinitude_of_primes" if t == "infinitude" else t)
+SCOPE_THEOREM = {t: (THEOREM if t == "infinitude" else t)
                  for t in SCOPE_TARGETS}
 SCOPE_BY_THEOREM = {v: k for k, v in SCOPE_THEOREM.items()}
 
-LANGUAGES = {
-    "en": "English",
-    "fr": "French",
-    "de": "German",
-    "es": "Spanish",
-    "zh": "Chinese",
-    "ja": "Japanese",
-}
 
-STYLES = {
-    "terse": "Write in a terse, austere style: minimal prose, heavy use of "
-             "notation, no motivation or commentary, like a research "
-             "monograph.",
-    "verbose": "Write in an expansive, pedagogical style: motivate each step, "
-               "explain the idea behind the argument in words, as if for an "
-               "undergraduate seeing it for the first time.",
-}
 
-TECHNIQUE_TEMPLATE = """Write a complete, correct, self-contained proof that there are infinitely many prime numbers.
+TECHNIQUE_TEMPLATE = """Write a complete, correct, self-contained proof that {statement}.
 
 Proof technique (follow this approach and no other): {technique}
 
@@ -170,7 +135,7 @@ Style: {style}
 
 Output only the proof itself. No title, no preamble, no closing remarks."""
 
-EXTREME_TEMPLATE = """Write a complete, correct, self-contained proof that there are infinitely many prime numbers.
+EXTREME_TEMPLATE = """Write a complete, correct, self-contained proof that {statement}.
 
 Choose the proof yourself. You are not restricted to any particular argument.
 
@@ -218,7 +183,7 @@ def build_grid(n_samples: int, scope_samples: int = 0):
         yield {
             "id": f"t__{tech}__{lang}__{style}__{k}",
             "arm": "technique",
-            "theorem": "infinitude_of_primes",
+            "theorem": THEOREM,
             "technique": tech,
             "direction": None,
             "language": lang,
@@ -234,7 +199,7 @@ def build_grid(n_samples: int, scope_samples: int = 0):
         yield {
             "id": f"x__{direction}__{lang}__{k}",
             "arm": "extreme",
-            "theorem": "infinitude_of_primes",
+            "theorem": THEOREM,
             "technique": None,
             "direction": direction,
             "language": lang,
@@ -265,12 +230,14 @@ def build_grid(n_samples: int, scope_samples: int = 0):
 def prompt_for(meta: dict) -> str:
     if meta["arm"] == "technique":
         return TECHNIQUE_TEMPLATE.format(
+            statement=STATEMENT,
             technique=TECHNIQUES[meta["technique"]],
             language=LANGUAGES[meta["language"]],
             style=STYLES[meta["style"]],
         )
     if meta["arm"] == "extreme":
         return EXTREME_TEMPLATE.format(
+            statement=STATEMENT,
             direction=DIRECTIONS[meta["direction"]],
             language=LANGUAGES[meta["language"]],
         )
@@ -410,13 +377,13 @@ def collect(client, batch_id: str, poll_seconds: int = 60):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--samples", type=int, default=5,
+    ap.add_argument("--samples", type=int, default=SAMPLES,
                     help="samples per cell in the technique and extreme arms "
                          "(default 5 -> the 450-proof corpus)")
     ap.add_argument("--scope-arm", action="store_true",
                     help="also generate the scope arm and the centre cell "
                          "(off by default; the published corpus is the 450)")
-    ap.add_argument("--scope-samples", type=int, default=3,
+    ap.add_argument("--scope-samples", type=int, default=SCOPE_SAMPLES,
                     help="samples per cell in the scope arm (default 3)")
     ap.add_argument("--submit", action="store_true")
     ap.add_argument("--collect", action="store_true")
