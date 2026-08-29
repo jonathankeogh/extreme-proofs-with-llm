@@ -1,16 +1,6 @@
 """
-The whole analysis, in one run.
 
-Reads all three corpora and their cached embeddings and prints every stage
-in the order the write-up reads them. Nothing here embeds anything: the
-caches are produced by embedding.py, which is the only file that loads
-bge-m3 and the only one that needs it installed.
-
-There are no arguments. The run takes about two minutes for all three
-theorems, both masking tiers and every stage, so there is nothing worth
-making configurable -- and no way to produce a number by passing a flag
-that is not written down in this file. What varies between theorems lives
-in the constants below.
+Reads all three corpora and their cached embeddings and prints every analysis stage
 
   Stage 1  lengths        integrity, raw and normalised lengths, direction
                           vs language separation, CJK x direction
@@ -39,57 +29,6 @@ in the constants below.
                           the masked corpus has been embedded; stage 6
                           prints the command.
 
-Section numbers within a stage are the ones the write-up cites, so
-"probes.py section 11" is stage 3 section 11 and "extreme.py section 8" is
-stage 4 section 8.
-
-HOW TO READ THIS FILE
-
-Top to bottom is the order it runs, and `main()` at the end is the whole
-pipeline on one screen -- start there if you want the shape before the
-detail. Between here and there the file is seven blocks, one per stage,
-each opening with a "# ====" banner that argues for what the stage is
-doing and why it is trustworthy.
-
-One stage is one function. Everything a stage needs is defined inside it,
-so reading `stage_extreme` top to bottom is reading the whole of stage 4
-and nothing else. Each is the step-by-step it prints: a numbered section,
-the computation, the next section. Only four helpers are shared, and they
-sit above stage 1 -- `centre_by`, `hard_probe` and `cross_lingual_transfer`
-because stages 3 and 7 both call them, and `select_registry` because
-`main()` picks the registry once and hands it to stages 5 and 6.
-
-Two things are deliberately out of the way. The lookup tables -- the
-registries of named results, the mathematicians' surnames, the diagnostic
-notation -- are five hundred lines of regexes with no logic in them, so
-they live in lookup_tables.py, which this file imports and which imports
-nothing back. And the handful of genuinely shared helpers (`load`, `rule`,
-`banner`) are at the top, before stage 1.
-
-So the analysis is three files: embedding.py makes the .npy, this file
-reads it, lookup_tables.py holds the strings both of the tables-driven
-stages match against.
-
-What to read if you only read part:
-
-  the argument       the "# ====" banners, in order. Seven of them, and
-                     together they are the case the write-up makes.
-  what actually ran  `main()`, which is the entire run: three corpora, and
-                     within each, seven stages and two masking tiers.
-  the load-bearing   stage 3 section 9 (a bag of words nearly matches the
-  numbers            encoder), stage 4 section 7 (the out-of-set threshold
-                     that was over-read), stage 5 section 3 (the
-                     coordinate that fixes it), stage 6 (whether any of it
-                     survives the vocabulary going away).
-
-One caution while reading: the stages share a single list of record dicts
-and several of them annotate it in place -- stage 1 adds the length
-columns and the within-language z, stage 5 adds the invoked-results
-counts. That is what makes one pass possible, and it is why `load()`
-captures the corpus's original field names and stage 6 writes only those.
-
-Usage:
-    python analysis/analyse.py
 
 Stage 7 needs the masked corpora embedded, which stage 6 cannot do because
 this file never loads the model. The first run writes them and says so;
@@ -102,6 +41,7 @@ import json
 import math
 import re
 import statistics as st
+import sys
 from collections import Counter, defaultdict
 from itertools import combinations
 from pathlib import Path
@@ -116,40 +56,25 @@ from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder
 
-from embedding import ROOT, cache_for
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT / "config"))
+
+import config
+from embedding import cache_for
 from lookup_tables import (
     NAMES, NOTATION, PROOF_RX, PROOF_SUBS, REGISTRIES,
     compile_forms, compile_registry)
 
-# Every corpus, analysed in turn. One theorem per file, kept apart rather
-# than pooled: the analysis estimates language means from the corpus it is
-# given, and a Pythagoras proof is not evidence about how Chinese renders a
-# proof about primes.
-CORPORA = [ROOT / "generate_proofs" / f"proofs_{t}.jsonl"
-           for t in ("primes", "sqrt2", "pythagoras")]
-
-# Terms per language for the discriminative masking tier: the point where
-# the lexical baseline is dead. Pythagoras needs twice as many -- its
-# vocabulary is more redundant, and it still sits at 0.433 after 400.
+# Terms per language for the discriminative masking tier
 TOPK = {"proofs_primes.jsonl": 400,
         "proofs_sqrt2.jsonl": 400,
         "proofs_pythagoras.jsonl": 800}
 
-# Both masking tiers are reported, because they are two results and not
-# two settings: `both` is the null result (the citations are not the
-# give-away) and `discriminative` is the one that kills the baseline.
-TIERS_REPORTED = ("both", "discriminative")
-
-# The labelled arm: the only one carrying a technique label, so the only
-# one the instrument can be validated on.
+# The labelled arm the instrument can be validated on.
 ARM = "technique"
 
-# Within-language diagnostics run in English, the language with the
-# reference figures in the write-up.
-LANG = "en"
-
-# Neighbourhood size for stage 2.
-KNN = 10
+# Language used in masking
+LANG = 'en'
 
 # The direction stage 5 section 5 prints its matches for -- machinery,
 # because that is the arm the registry exists to measure.
@@ -170,24 +95,6 @@ def banner(t):
 
 
 def load(corpus: Path):
-    """
-    The corpus, read once and shared by every stage.
-
-    Previously each script parsed the corpus itself, so each got a clean
-    copy. Here the stages share one list of dicts and several of them
-    annotate it in place -- stage 1 adds the length columns and the
-    within-language z, stage 5 adds the invoked-results counts. That is
-    what makes one pass possible, and it is also a trap: stage 6 writes
-    records back out to a new corpus file, and those derived fields must
-    not travel with them.
-
-    So the field names the corpus actually arrived with are captured here,
-    before any stage has touched a record, and returned alongside. The
-    union rather than the first record's keys, because the corpus is not
-    uniform: records from the first generation run carry no `max_tokens`.
-    Any field a future stage adds is excluded automatically, which a
-    hand-maintained list of derived names would not manage.
-    """
     with corpus.open() as f:
         recs = [json.loads(l) for l in f if l.strip()]
     fields = set().union(*(r.keys() for r in recs))
@@ -200,65 +107,31 @@ def load(corpus: Path):
     return recs, fields
 
 
-def load_embeddings(corpus: Path, cache: Path, recs):
+def load_embeddings(cache: Path):
     X = np.load(cache)
     print(f"embeddings from {cache}: {X.shape[0]} x {X.shape[1]}")
     return X
-
-
-def select_registry(recs):
-    """
-    Pick the registry from the corpus's own `theorem` field.
-
-    The corpus states which theorem it proves, so the caller does not have
-    to remember. An unknown theorem is a hard stop rather than a fallback:
-    silently matching a primes registry against other proofs is precisely
-    the failure this selection exists to prevent.
-    """
-    name = Counter(r["theorem"] for r in recs).most_common(1)[0][0]
-    # Indexing rather than .get(): an unknown theorem must stop here. A
-    # fallback to another theorem's registry would report a recall failure
-    # as a null result, which is the one way this can be wrong quietly.
-    return name, REGISTRIES[name]
-
-
-# ======================================================================
-# Stage 1: lengths
-#
-# Character count is not comparable across scripts: a Chinese proof of the
-# same content is roughly 0.57x the length of the English one -- the
-# CJK-to-Latin median ratio measured on this corpus, stable across all five
-# directions, which is what identifies it as a property of the script
-# rather than of the proof. The effect is multiplicative, so section 3
-# works in log space, where a constant ratio becomes a constant offset and
-# subtracting a per-language mean removes it.
-#
-# Baselines use all records in a language from the technique and extreme
-# arms, not just the extreme arm. The grid is balanced identically across
-# languages, so no language gets an unfair baseline. Scope-arm records,
-# where present, are excluded from the baseline: they prove a different
-# theorem, so their length is not a fact about language.
-# ======================================================================
 
 
 def stage_lengths(recs):
     banner("STAGE 1: lengths")
 
     # ---------------------------------------------------------------- 0
-    rule("0. Integrity")
+    rule("0. Integrity check")
     ids = [r["id"] for r in recs]
     print(f"records            {len(recs)}")
     print(f"unique ids         {len(set(ids))}")
     print(f"truncated          {sum(r['stop_reason'] == 'max_tokens' for r in recs)}")
     print(f"empty proofs       {sum(r['chars'] == 0 for r in recs)}")
 
+    # Check we didn't mix up models and/or reasonings
     for field in ("model", "effort"):
         vals = {r.get(field) for r in recs}
-        flag = "" if len(vals) == 1 else "  <- mixed, model differences and effort confounding all the factors"
+        flag = "" if len(vals) == 1 else " WARNING: mix of model and reasoning effort, confounding"
         print(f"{field:18} {sorted(map(str, vals))}{flag}")
 
-    # One prompt per (direction, language) is what is expected by design: the template
-    # move between the language names so a direction has 6 distinct prompts.
+    # In the extreme arm, one prompt per (direction, language) is what is expected by design
+    # Check we didn't mix up prompts per single cell
     per_cell = defaultdict(set)
     for r in recs:
         if r["arm"] == "extreme":
@@ -266,9 +139,8 @@ def stage_lengths(recs):
     bad = {k: len(v) for k, v in per_cell.items() if len(v) != 1}
     print(f"cells w/ mixed prompt  {len(bad)}" + (f"  {bad}" if bad else ""))
 
-    # ---------------------------------------------------------------- 1
-    # Quick sanity check that we don't have something oddly long or oddly short, language effects kept
-    rule("1. Raw length by direction (characters, pooled over languages)")
+
+    rule("1. Raw length by extremal direction (characters, pooled over languages)")
     d = defaultdict(list)
     for r in recs:
         if r["arm"] == "extreme":
@@ -277,7 +149,6 @@ def stage_lengths(recs):
         print(f"  {k:14} median {st.median(v):7.0f}   n={len(v)}")
     print("  Pooled over scripts, so this axis still carries the language effect.")
 
-    # ---------------------------------------------------------------- 2
     # within (direction, language) how much variation in length do we see in the samples (e.g. n=5)
     rule("2. Cell medians and within-cell variation")
     d = defaultdict(list)
@@ -292,7 +163,6 @@ def stage_lengths(recs):
     print("  higher means real sampling variation")
     print("  Note that 5 samples is a poor estimate of the true variance, this is not a statistical result we are just doing a first pass")
 
-    # ---------------------------------------------------------------- 3
     # Script density affects sequence length, and we do not want that
     # confounded with the underlying proof structure. The effect is
     # multiplicative, so take the log and standardise within language,
@@ -316,83 +186,48 @@ def stage_lengths(recs):
     for r in recs:
         if r["arm"] == "extreme":
             d[(r["direction"], r["language"])].append(r["z"])
-    cell = {k: st.mean(v) for k, v in d.items()}
-    for k in sorted(cell):
-        print(f"  {k[0]:14} {k[1]:4} z {cell[k]:+.2f}")
+    direction_language_cell = {k: st.mean(v) for k, v in d.items()}
+    for k in sorted(direction_language_cell):
+        print(f"  {k[0]:14} {k[1]:4} z {direction_language_cell[k]:+.2f}")
     # It is unsurprising that brevity is negative and machinery positive.
     # That is a hopeful sign the structure is there, not a result yet.
 
-    # ---------------------------------------------------------------- 4
-    # Now with the normalised cell lengths: is the spread across directions
-    # much larger than the spread across languages? It needs to be.
-    rule("4. Direction separation vs language spread")
-    dirs = sorted({k[0] for k in cell})
-    means, spreads = {}, {}
-    print(f"  {'direction':14} {'mean z':>8} {'lang spread':>12}")
-    for dd in dirs:
-        vals = [v for k, v in cell.items() if k[0] == dd]
-        means[dd] = st.mean(vals)
-        spreads[dd] = max(vals) - min(vals)
-    for dd in sorted(dirs, key=lambda x: means[x]):
-        print(f"  {dd:14} {means[dd]:+8.2f} {spreads[dd]:12.2f}")
+    directions = sorted({k[0] for k in direction_language_cell})
+    means = {}
+    for direction in directions:
+        vals = [v for k, v in direction_language_cell.items() if k[0] == direction]
+        means[direction] = st.mean(vals)
 
-    between = max(means.values()) - min(means.values())
-    within = st.mean(list(spreads.values()))
-    print(f"\n  between-direction range   {between:.2f}")
-    print(f"  mean within-dir spread    {within:.2f}")
-    print(f"  ratio                     {between / within:.1f} : 1")
-    print("  A high ratio is evidence that language behaves as a nuisance")
-    print("  factor on this axis, this is the assumption the 6-language design rests on!")
-
-    print("\n  Directions within 0.15 z of each other (unseparated by length):")
-    ordered = sorted(dirs, key=lambda x: means[x])
-    close = [(a, b) for a, b in zip(ordered, ordered[1:])
-             if abs(means[a] - means[b]) < 0.15]
-    for a, b in close:
-        print(f"    {a} ~ {b}")
-    if not close:
-        print("    none")
-
-    # ---------------------------------------------------------------- 5
     # Hold direction steady and see how much moves between Latin and CJK.
     rule("5. CJK vs Latin, per direction (normalised scale)")
     print("  A level difference between scripts is already removed by section 3.")
     print("  Anything left here is a language x direction interaction.")
     print(f"\n  {'direction':14} {'latin':>7} {'cjk':>7} {'gap':>7}")
-    for dd in dirs:
-        latin = [v for k, v in cell.items()
-                 if k[0] == dd and k[1] not in CJK]
-        cjk = [v for k, v in cell.items() if k[0] == dd and k[1] in CJK]
+    for direction in directions:
+        latin = [v for k, v in direction_language_cell.items()
+                 if k[0] == direction and k[1] not in CJK]
+        cjk = [v for k, v in direction_language_cell.items()
+               if k[0] == direction and k[1] in CJK]
         gap = st.mean(cjk) - st.mean(latin)
         flag = "  <--" if abs(gap) > 0.25 else ""
-        print(f"  {dd:14} {st.mean(latin):+7.2f} {st.mean(cjk):+7.2f} "
+        print(f"  {direction:14} {st.mean(latin):+7.2f} {st.mean(cjk):+7.2f} "
               f"{gap:+7.2f}{flag}")
 
     # ---------------------------------------------------------------- 6
-    # The centre cell is kept out of the section-3 baseline, because a
-    # baseline should be estimated from the balanced grid rather than from
-    # a cell that is part of what is being measured. But it is the origin
-    # every extremal direction is supposed to be extreme RELATIVE TO, so it
-    # belongs on the same scale as them, which is what this prints.
-    theorem = Counter(r["theorem"] for r in recs
-                      if r["arm"] != "scope").most_common(1)[0][0]
-    home = [r for r in recs
+    # Now do calcs relative to the unprompted centre
+    theorem = next(r["theorem"] for r in recs if r["arm"] != "scope")
+    centre_proofs = [r for r in recs
             if r["arm"] == "scope" and r["theorem"] == theorem]
-    if home:
-        rule("6. The centre cell: same theorem, no selection criterion")
-        z0 = st.mean([r["z"] for r in home])
-        print(f"  unprompted     n={len(home)}   mean z {z0:+.2f}")
-        print(f"  {'direction':14} {'mean z':>8} {'vs centre':>11}")
-        for d in sorted(means, key=lambda x: means[x]):
-            print(f"  {d:14} {means[d]:+8.2f} {means[d] - z0:+11.2f}")
-        print("\n  The right-hand column is the one that means something: a")
-        print("  direction is only extreme relative to what the model writes")
-        print("  when nothing is being asked of it. A direction sitting at the")
-        print("  centre cell's length is not moving along this axis at all.")
+
+    rule("6. The centre cell: same theorem, no selection criterion")
+    z0 = st.mean([r["z"] for r in centre_proofs])
+    print(f"  unprompted     n={len(centre_proofs)}   mean z {z0:+.2f}")
+    print(f"  {'direction':14} {'mean z':>8} {'vs centre':>11}")
+    for d in sorted(means, key=lambda x: means[x]):
+        print(f"  {d:14} {means[d]:+8.2f} {means[d] - z0:+11.2f}")
 
     print("\nCaveat: character count is a proxy for proof length, but not a measure")
-
-
+    exit()
 # ======================================================================
 # Stage 2: probes on the embedding
 #
@@ -495,8 +330,6 @@ def stage_probes(recs, X):
 # ======================================================================
 # Stage 3: structural probes
 #
-# Everything here reads the cached embeddings. No re-embedding, no API
-# calls, no model download -- seconds, not minutes.
 #
 #   1. language_spectrum   How many dimensions does language actually
 #                          occupy? SVD of the six language means.
@@ -1080,6 +913,101 @@ def stage_structure(recs, X):
 
     rule("13. Extremal ranking of the techniques")
     extremal_ranking(X, recs)
+
+
+# ======================================================================
+# Stage 3b: is the centre of the grid the centre cell?
+#
+# Numbered 3b rather than 4 on purpose: the README indexes stages 1-7 by
+# number, and this is a question that only became askable once stage 3
+# showed language is a removable additive offset. It runs on the same two
+# objects stage 3 does and adds no estimate anything downstream uses.
+#
+# Stage 1 section 6 found the centre cell on the length axis -- the scope
+# arm's own-theorem target, asked with no selection criterion. That is a
+# cell the corpus contains. The centroid of the whole grid is a different
+# object: the mean of every technique and extreme record, a point no
+# prompt targeted. If the extremal directions really do surround a
+# default, the two should land in the same place.
+#
+# Raw cosines are reported but should not be read: bge-m3 is anisotropic
+# enough that every cell pair sits above 0.75, so only the ranking carries
+# information. The language-centred column is the one that means anything.
+# ======================================================================
+
+
+def stage_centre(recs, X):
+    banner("STAGE 3b: the centre of the grid")
+
+    def cells_of(recs):
+        """
+        Name every cell the corpus contains, by the factor that defines
+        it: direction for the extreme arm, technique for the labelled
+        arm, target statement for the scope arm.
+        """
+        out = defaultdict(list)
+        for i, r in enumerate(recs):
+            if r["arm"] == "scope":
+                out[("scope", r["theorem"])].append(i)
+            elif r["arm"] == "extreme":
+                out[("extreme", r["direction"])].append(i)
+            else:
+                out[("technique", r["technique"])].append(i)
+        return out
+
+    def unit(v):
+        return v / max(float(np.linalg.norm(v)), 1e-9)
+
+    # The centre cell, identified exactly as stage 1 section 6 does: the
+    # scope records that prove the grid's own theorem.
+    theorem = Counter(r["theorem"] for r in recs
+                      if r["arm"] != "scope").most_common(1)[0][0]
+    centre_key = next((("scope", r["theorem"]) for r in recs
+                       if r["arm"] == "scope" and r["theorem"] == theorem),
+                      None)
+    if centre_key is None:
+        print("  No own-theorem scope cell in this corpus; nothing to compare.")
+        return
+
+    # The grid is the technique and extreme arms. Scope records prove
+    # OTHER statements, so they are not part of the thing whose centre is
+    # being located -- they are only scored against it.
+    grid = [i for i, r in enumerate(recs) if r["arm"] != "scope"]
+    cells = cells_of(recs)
+
+    Xr = X / np.clip(np.linalg.norm(X, axis=1, keepdims=True), 1e-9, None)
+
+    # Not centre_by: that would estimate each language mean from every
+    # record, scope arm included. The means have to come from the balanced
+    # grid, and the scope records then get scored against them.
+    mu = {lang: X[[i for i in grid if recs[i]["language"] == lang]].mean(0)
+          for lang in {r["language"] for r in recs}}
+    Xc = np.stack([X[i] - mu[recs[i]["language"]] for i in range(len(recs))])
+    Xc /= np.clip(np.linalg.norm(Xc, axis=1, keepdims=True), 1e-9, None)
+
+    for name, M in (("raw", Xr), ("language-centred", Xc)):
+        rule(f"{'1' if name == 'raw' else '2'}. Cell centroids vs the grid "
+             f"centroid ({name})")
+        grand = unit(M[grid].mean(0))
+        sims = sorted(((float(grand @ unit(M[i].mean(0))), k)
+                       for k, i in cells.items()), reverse=True)
+        rank = [k for _, k in sims].index(centre_key) + 1
+
+        print(f"  {'cell':32} {'cos':>7}")
+        for s, k in sims:
+            mark = "  <- centre cell" if k == centre_key else ""
+            print(f"  {k[0] + ':' + k[1]:32} {s:+7.3f}{mark}")
+        print(f"\n  centre cell rank {rank} of {len(sims)}")
+        if name == "raw":
+            print("  Raw cosines span a narrow band -- bge-m3's anisotropy, not")
+            print("  a finding. Only the rank is worth reading in this section.")
+
+    print("\n  If the centre cell ranks at or near the top of section 2, the")
+    print("  grid's centre of mass is a real place: the extremal directions")
+    print("  cancel, and what they cancel to is what the model writes when")
+    print("  nothing is asked of it. Where it does NOT rank first, the cells")
+    print("  above it name the imbalance -- the techniques the grid")
+    print("  over-samples relative to the model's default.")
 
 
 # ======================================================================
@@ -1778,43 +1706,18 @@ def stage_coordinates(all_recs, theorem, registry):
 # aligning arguments across languages may be nothing more than it aligning
 # proper nouns.
 #
-# This stage removes those tokens and lets the two stories come apart. It
-# rewrites the corpus with the give-away terms replaced by a single neutral
-# placeholder, so that the masked corpus embeds through embedding.py
-# unchanged -- same records, same order, same row count -- and stage 7 can
-# compare the two spaces row by row. The reference machinery is taken from
-# the stage 5 registry rather than from a fresh word list invented here.
-#
-# Masking tiers, weakest to strongest: names, machinery, both, notation,
-# all, discriminative. The registry tiers turn out to remove nothing:
-# masking every named theorem, every mathematician and every diagnostic
-# symbol leaves the lexical baseline exactly where it was, at 0.940. The
-# technique label is not in the citations, it is in the ordinary
-# descriptive vocabulary, and only a data-driven list reaches it.
-# `discriminative` is the tier to use.
-#
-# What this cannot do, and reports instead of hiding:
-#
-#   1. Masking leaves a hole of a known size. Section 3 measures that leak
-#      from the features a reader of the masked text can actually see.
-#   2. Paraphrase survives masking. This puts an upper bound on the lexical
-#      contribution, not an exact figure.
-#   3. At the point where the lexical baseline dies, roughly a tenth of the
-#      text is gone. Section 2 checks the loss is even across techniques,
-#      because brevity is one of the value functions under study.
+# This stage removes technique-diagnostic vocabulary and lets the two
+# stories come apart. It rewrites the corpus with those terms replaced by
+# a single neutral placeholder, so that the masked corpus embeds through
+# embedding.py unchanged -- same records, same order, same row count -- and
+# stage 7 can compare the two spaces row by row.
 # ======================================================================
 
 
 PLACEHOLDER = "⟨m⟩"
 
-
 TIERS = {
-    "names": ["names"],
-    "machinery": ["machinery"],
-    "both": ["names", "machinery"],
-    "notation": ["notation"],
-    "all": ["names", "machinery", "notation"],
-    "discriminative": ["names", "machinery", "notation", "discriminative"],
+    "discriminative": ["discriminative"],
 }
 
 # Languages whose tokens the word analyser can find. Japanese and Chinese
@@ -2126,7 +2029,7 @@ def stage_masking(recs, fields, theorem, registry, corpus: Path, tier,
                                 LogisticRegression(max_iter=3000))
             pipe.fit([texts[k2] for k2 in tr], y_all[tr])
             acc = pipe.score([texts[k2] for k2 in te], y_all[te])
-            ex = ", ".join(terms[:3]) if terms else "(registry tiers only)"
+            ex = ", ".join(terms[:3]) if terms else "(none)"
             print(f"  {k:>14} {acc:8.3f} {np.mean(kept):8.3f}  {ex}")
 
     # ---------------------------------------------------------------- 6
@@ -2260,11 +2163,8 @@ def stage_masking(recs, fields, theorem, registry, corpus: Path, tier,
         print(f"reusing   {out.name}")
         masked = [json.loads(l)["proof"] for l in out.open() if l.strip()]
     else:
-        # The discriminative terms are per language: the tokens that give
-        # a topological proof away in German are not the German spellings
-        # of the English ones, and for ja/zh they are character n-grams
-        # rather than words at all. So each record is masked with its own
-        # language's terms on top of the shared registry groups.
+        # Per language: the tokens a linear classifier leans on for each
+        # technique. ja/zh use character n-grams rather than words.
         per_lang = {}
         if "discriminative" in TIERS[tier]:
             for lg in sorted({r["language"] for r in recs}):
@@ -2306,16 +2206,15 @@ def stage_masking(recs, fields, theorem, registry, corpus: Path, tier,
     tfidf_on_masked(recs, masked, LANG)
 
     if "discriminative" in TIERS[tier]:
-        # Only worth sweeping on the tier where masking does something:
-        # the registry tiers sit flat at the unmasked baseline, so their
-        # curve is a straight line. Re-masks the corpus once per k, which
-        # is the slow part of the whole run -- about ten seconds.
+        # Only worth sweeping on the tier where masking does something.
+        # Re-masks the corpus once per k -- the slow part of the run.
         rule("5. Ablation curve: accuracy against vocabulary removed")
         ablation_curve(recs, groups, LANG,
                        [0, 5, 10, 25, 50, 100, 200, 400])
 
-    rule("6. Audit: do the hand-written lists match the corpus?")
-    audit(recs, groups)
+    if groups:
+        rule("6. Audit: do the hand-written lists match the corpus?")
+        audit(recs, groups)
 
     return out
 
@@ -2425,15 +2324,13 @@ def main():
     the reader having to know about, and no way to produce a number by
     passing a flag that is not in this file.
     """
-    for corpus in CORPORA:
+    for theorem, corpus in config.CORPORA.items():
         banner(f"CORPUS: {corpus.name}")
 
-        # Read once. Each stage is handed a view of these two objects and
-        # nothing else, so there is one parse of the corpus and one load
-        # of the embeddings per theorem.
         recs, fields = load(corpus)
-        X = load_embeddings(corpus, cache_for(corpus), recs)
-        theorem, registry = select_registry(recs)
+        X = load_embeddings(cache_for(corpus))
+        registry = REGISTRIES[theorem]
+
 
         # The technique arm is the labelled part -- the only arm that says
         # which known proof each record is -- so it is the slice the
@@ -2441,19 +2338,32 @@ def main():
         arm = [i for i, r in enumerate(recs) if r["arm"] == ARM]
         arm_recs, arm_X = [recs[i] for i in arm], X[arm]
 
-        # 1. Length, before any embedding is involved. Establishes that
-        #    language is a nuisance factor on this axis, and finds the
+        # 1. Char length before any embedding is involved. Does some basic
+        #    counting analysis and finds the
         #    centre cell every extremal direction is measured against.
+        # Character count is not comparable across scripts: a Chinese proof of the
+        # same content is roughly 0.57x the length of the English one, so section 3
+        # works in log space, where a constant ratio becomes a constant offset and
+        # subtracting a per-language mean removes it.
+        #
+        # Scope-arm records, are excluded from the baseline because they prove a different
+        # theorem, so their length is not a fact about language.
         stage_lengths(recs)
 
-        # 2. Is the embedding an instrument at all? Pooled and
-        #    leave-one-language-out probes on the labelled arm.
+        # 2. Can we remove all language data with a simple removal of the mean directoin?
         stage_probes(recs, X)
 
         # 3. What is actually in the space: how many dimensions language
         #    occupies, whether the factors are separable or merely
         #    orthogonal, how much of the technique signal is vocabulary.
         stage_structure(arm_recs, arm_X)
+
+        # 3b. Stage 1 found the centre cell on the length axis. Now that
+        #     language is known to be removable, ask the same question in
+        #     the embedding: is the centroid of the whole grid -- a point
+        #     no prompt targeted -- the same place as the cell where
+        #     nothing was asked?
+        stage_centre(recs, X)
 
         # 4. The question the corpus was built for: which known argument
         #    does the model reach for when asked for a vertex?
@@ -2464,16 +2374,9 @@ def main():
         #    where stage 4's cosine could not.
         stage_coordinates(recs, theorem, registry)
 
-        # 6 and 7, once per masking tier, because the two tiers are two
-        # different results rather than two settings. `both` is the null
-        # -- masking every named theorem and every mathematician moves
-        # the lexical baseline not at all -- and `discriminative` is the
-        # one that finally moves it, by taking the ordinary descriptive
-        # vocabulary away instead of the citations.
-        for tier in TIERS_REPORTED:
-            masked = stage_masking(recs, fields, theorem, registry, corpus,
-                                   tier, TOPK[corpus.name])
-            stage_ablation(arm_recs, arm_X, masked)
+        masked = stage_masking(recs, fields, theorem, registry, corpus,
+                               "discriminative", TOPK[corpus.name])
+        stage_ablation(arm_recs, arm_X, masked)
 
 
 if __name__ == "__main__":
