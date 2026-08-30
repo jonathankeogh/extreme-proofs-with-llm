@@ -96,9 +96,11 @@ def embed(records, model_name, cache: Path):
     # above costs nothing: loading sentence_transformers is most of this
     # script's startup time, and it is not needed to redraw a figure.
     from sentence_transformers import SentenceTransformer
+    import torch
 
-    print(f"Embedding {len(records)} proofs with {model_name}")
-    model = SentenceTransformer(model_name)
+    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    print(f"Embedding {len(records)} proofs with {model_name} on {device}")
+    model = SentenceTransformer(model_name, device=device)
     lim = model.max_seq_length
     print(f"  max_seq_length = {lim} tokens")
     X = model.encode([r["proof"] for r in records], show_progress_bar=True,

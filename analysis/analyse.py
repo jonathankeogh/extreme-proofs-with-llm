@@ -16,30 +16,10 @@ Reads all three corpora and their cached embeddings and prints every analysis st
                           centroids: confidence, out-of-set threshold,
                           direction x technique with a permutation null,
                           and the scope test.
-  Stage 5  coordinates    the non-lexical second coordinate -- distinct
-                          named external results invoked -- with the
-                          script-independence, length-confound and
-                          machinery-vs-contrast tests.   (no embeddings)
-  Stage 6  masking        rewrites the corpus with the technique-diagnostic
-                          vocabulary replaced by a neutral placeholder, and
-                          reports coverage, shrinkage, the leak check and
-                          the lexical baseline on the result.
-  Stage 7  ablation       stage 3's figures recomputed on the masked space,
-                          printed beside the unmasked ones. Runs only when
-                          the masked corpus has been embedded; stage 6
-                          prints the command.
-
-
-Stage 7 needs the masked corpora embedded, which stage 6 cannot do because
-this file never loads the model. The first run writes them and says so;
-embed them and run again to fill that stage in:
-
-    python analysis/embedding.py --corpus <masked corpus> --no-figures
 """
 
 import json
 import math
-import re
 import statistics as st
 import sys
 from collections import Counter, defaultdict
@@ -47,13 +27,11 @@ from itertools import combinations
 from pathlib import Path
 
 import numpy as np
-from scipy.stats import chi2_contingency, spearmanr
+from scipy.stats import chi2_contingency
 from sklearn.decomposition import PCA
-from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import silhouette_score
 from sklearn.model_selection import cross_val_predict, cross_val_score
-from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import LabelEncoder
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -61,24 +39,12 @@ sys.path.insert(0, str(ROOT / "config"))
 
 import config
 from embedding import cache_for
-from lookup_tables import (
-    NAMES, NOTATION, PROOF_RX, PROOF_SUBS, REGISTRIES,
-    compile_forms, compile_registry)
-
-# Terms per language for the discriminative masking tier
-TOPK = {"proofs_primes.jsonl": 400,
-        "proofs_sqrt2.jsonl": 400,
-        "proofs_pythagoras.jsonl": 800}
 
 # The labelled arm the instrument can be validated on.
 ARM = "technique"
 
 # Language used in masking
 LANG = 'en'
-
-# The direction stage 5 section 5 prints its matches for -- machinery,
-# because that is the arm the registry exists to measure.
-SHOW_DIRECTION = "machinery"
 
 # non-latin character languages
 CJK = {"ja", "zh"}
@@ -227,104 +193,129 @@ def stage_lengths(recs):
         print(f"  {d:14} {means[d]:+8.2f} {means[d] - z0:+11.2f}")
 
     print("\nCaveat: character count is a proxy for proof length, but not a measure")
-    exit()
+
 # ======================================================================
-# Stage 2: probes on the embedding
+# Stage 2: probes on the embedding - the purpose it figure out if technique is being captured first
 #
-# The technique arm carries ground-truth labels: you know which of the
-# known proofs each record is, in each of six languages. That makes it a
-# labelled test set for the embedding itself. The extreme arm has no
-# technique label -- it is what stage 4 classifies, once the instrument is
-# validated here.
+# We should do a quick linear probe and think about the results
+# This turned out to be dumb, because the learning is over-specified, the matrix
+# is (num languages) x (embedding dim) = 5 x 1024 = 5125 for the languages. For 300 samples that's meaningless
+# because 5125 / 300 = 17 whcih means we can twiddle each 17 knob to fit our label for each sample
+
+# theorem: n points in general position in 𝑅^𝑑 can be split by a hyperplane for any binary labelling as long as 
+# 𝑛 ≤ 𝑑 + 1
+# 
 # ======================================================================
 
 
 def stage_probes(recs, X):
-    banner("STAGE 2: probes on the embedding")
+    # recs is the corpus, before embedding
+    # X is the embeddings matrix of the corpus
+    banner("STAGE 2: linear probes on the embedding")
 
+
+    # A linear probe here is just saying, can we linearly seperate the factors
     def probe(M, y, name):
-        """5-fold CV accuracy of a linear probe, against chance."""
+        """5-fold CV accuracy of a linear probe against chance"""
+        # encode our labels y
         yi = LabelEncoder().fit_transform(y)
         k = len(set(yi))
+        # fit a linear probe f(x) = Ax + b with 5 folds (5 chunks of train and tests) composed with softmax
+        # "logistic" because it models log-odds as linear: log(p/(1-p)) = Ax + b
+        # then use log-loss to train, capped at 3000 iters.
+        # then average the accuracy
         acc = cross_val_score(LogisticRegression(max_iter=3000), M, yi,
                               cv=5).mean()
+        # silhouette measures clustering by pairwise distances
+        # for each point i:
+        #   a(i) = mean distance to the other points in its OWN group
+        #   b(i) = mean distance to the nearest OTHER group
+        #   s(i) = (b - a) / max(a, b),  averaged over all points.
+        # near 1  means own group far closer than any other
+        #  0  means it's in no man's land
+        # near -1 means it's closer to another group than to its own
+        # Note this is a different question from the probe's, that is,  classes can be
+        # perfectly separable by a hyperplane and still score near 0 here
+        # (think about long parallel stripes, not round blobs)
         sil = silhouette_score(M, yi)
         print(f"  {name:<10} k={k}  acc={acc:.3f}  chance={1/k:.3f}  "
               f"lift={acc - 1/k:+.3f}  silhouette={sil:+.3f}")
-        return acc - 1 / k
 
-    def lolo(M, rs):
-        """Train on five languages, test on the held-out sixth."""
-        langs = sorted({r["language"] for r in rs})
-        y = LabelEncoder().fit_transform([r["technique"] for r in rs])
+    # leave-one-langauge-out, linear probe
+    def lolo(M, y, groups):
+        """Train on every group but one and test on the held-out group"""
+        yi = LabelEncoder().fit_transform(y)
         accs = []
-        for held in langs:
-            tr = [i for i, r in enumerate(rs) if r["language"] != held]
-            te = [i for i, r in enumerate(rs) if r["language"] == held]
-            clf = LogisticRegression(max_iter=3000).fit(M[tr], y[tr])
-            a = clf.score(M[te], y[te])
+        # hold out a language and train
+        # the purpose of this is to see, when the probe is trained on 5/6 languages to capture technique, does that
+        # generalise to the held out language?
+        # pooled 5-fold above cannot ask this because ervery random fold contains all six
+        # languages, so the model always has english in train and in test sets
+        #
+        # this is a generalisation test not a separability one, it says the
+        # technique direction transfers across languages, not that language
+        # and technique are independent! we test that lateer. they can still heavily depend. And it does not rule out
+        # the transfer riding on untranslated proper nouns, which we also test later
+        for held in sorted(set(groups)):
+            tr = [i for i, g in enumerate(groups) if g != held]
+            te = [i for i, g in enumerate(groups) if g == held]
+            clf = LogisticRegression(max_iter=3000).fit(M[tr], yi[tr])
+            a = clf.score(M[te], yi[te])
             accs.append(a)
             print(f"  hold out {held}   acc={a:.3f}")
         print(f"  mean {np.mean(accs):.3f}  min {min(accs):.3f}  "
-              f"chance {1 / len(set(y)):.3f}")
-        return np.mean(accs)
+              f"chance {1 / len(set(yi)):.3f}")
 
-    # Scoring uses the technique arm only: it is the labelled part.
+    # Scoring uses the technique arm only because it is the labelled part
+    # idx is the indices for the technique corpus
     idx = [i for i, r in enumerate(recs) if r["arm"] == "technique"]
+    # T is the technique corpus
     T = [recs[i] for i in idx]
+    # XT  is the technique embeddings
     XT = X[idx]
     print(f"\nScoring on the technique arm: {len(T)} labelled records")
 
     # ---------------------------------------------------------------- 1
-    print("\n1. Pooled linear probe (5-fold CV)")
-    lifts = {f: probe(XT, [r[f] for r in T], f)
-             for f in FACTORS}
+    print("\n1. Pooled linear probe (5-fold cross validation)")
+    for f in FACTORS:
+        probe(XT, [r[f] for r in T], f)
 
     # ---------------------------------------------------------------- 2
     # Pooled CV cannot separate "technique separates within every language"
     # from "technique separates in English only". This can.
     print("\n2. Leave-one-language-out probe, target = technique")
-    lolo_acc = lolo(XT, T)
+    lolo(XT, [r["technique"] for r in T], [r["language"] for r in T])
 
     # ---------------------------------------------------------------- 3
-    # Which factor dominates the local geometry: for each record, the
-    # fraction of its k nearest neighbours sharing each label.
-    print(f"\n3. Neighbourhood composition (k={KNN})")
+    # Which factor dominates the local geometry - for each record, the
+    # fraction of its k nearest neighbours sharing each label (but take only one sample from each cell)
+    # use 10-nearest neigbhours
+    KNN = 10
+    print(f"\n3. Neighbourhood composition (k={KNN}, same-cell excluded)")
+    # get the dot-product of every embedding in the techniques, so we can read off cosine similarity
     S = XT @ XT.T
-    np.fill_diagonal(S, -np.inf)
+    # create a boolean nxn of cells we want to mask
+    cell = [(r["technique"], r["language"], r["style"]) for r in T]
+    same_cell = np.array([[a == b for b in cell] for a in cell])
+    S[same_cell] = -np.inf          # mask set similarity for same cell as negative infinity, including itself ie diagonals
+    # sort by values but return indices, -S makes it descending, axis=1 sorts within row, then keep the first KNN columns
     nn = np.argsort(-S, axis=1)[:, :KNN]
     for field in FACTORS:
+        # the vakues of this field, e.g. euclid as your technique in the infintude of the primes
         vals = [r[field] for r in T]
+        # of the 10 nearest neigbhours, get the percent (mean of boolean values) that are the same technqieue for e.g.,
+        # and do this across the values in your factor (.e.g across technique factor, what is the average percent
+        # agreement with 10 nearest neighbours)
         share = np.mean([np.mean([vals[j] == vals[i] for j in nn[i]])
                          for i in range(len(T))])
+        # Chance that two records drawn at random share a label:
+        # sum_c n_c(n_c - 1) / n(n - 1). this handles class imbalance unlike
+        # the 1/k used in probe()
         base = sum(c * (c - 1) for c in Counter(vals).values()) / (
             len(T) * (len(T) - 1))
         print(f"  {field:<10} same-label among {KNN}-NN: {share:.3f}  "
-              f"(baseline {base:.3f})")
-
-    # ---------------------------------------------------------------- 4
-    # The same scores after subtracting each language's mean embedding.
-    # Same logic as the log-normalisation on the length axis, now
-    # vectorial. The balanced grid is what makes those means unbiased.
-    print("\n4. After subtracting each language's mean embedding")
-    XC = centre_by(XT, T, "language")
-    for f in FACTORS:
-        probe(XC, [r[f] for r in T], f)
-    print("  LOLO on centred embeddings:")
-    lolo(XC, T)
-
-    print("\nRead:")
-    print(f"  technique lift {lifts['technique']:+.3f} vs language lift "
-          f"{lifts['language']:+.3f}")
-    print(f"  LOLO technique accuracy {lolo_acc:.3f} (chance 0.200)")
-    print("  LOLO near pooled accuracy -> argument structure is")
-    print("  language-invariant in this space, and the extreme arm can be")
-    print("  classified against these five centroids.")
-    print("  LOLO collapsing toward chance -> the probe learned")
-    print("  language-specific surface features. Use the centred embeddings,")
-    print("  and if that does not recover it, the embedding is not a usable")
-    print("  instrument for this question -- a fact about the model, not")
-    print("  about proofs.")
+              f"(baseline {base:.3f}  lift {share - base:+.3f}  "
+              f"ratio {share / base:.2f}x)")
 
 
 # ======================================================================
@@ -334,7 +325,7 @@ def stage_probes(recs, X):
 #   1. language_spectrum   How many dimensions does language actually
 #                          occupy? SVD of the six language means.
 #                          "Additive" is weaker than "one-dimensional", and
-#                          the UMAP cannot tell them apart.
+#                          the UMAP can;t tell them apart
 #   2. style_spectrum      Same question for style.
 #   3. subspace_angles     Are the language and style subspaces orthogonal
 #                          to the technique subspace, or merely separable?
@@ -377,7 +368,7 @@ def hard_probe(X, recs, seed=0):
     print(f"  Probe accuracy is uninformative at full dimension: "
           f"{len(recs)} points")
     print("  with several near-duplicates per cell are trivially separable")
-    print(f"  in {X.shape[1]} dimensions. Two ways to make the task honest.")
+    print(f"  in {X.shape[1]} dimensions. There are two ways to improve this")
     rng = np.random.default_rng(seed)
 
     print(f"\n  (a) after PCA, all {len(recs)} records")
@@ -443,7 +434,7 @@ def cross_lingual_transfer(X, recs, train_lang="en"):
 
 def stage_structure(recs, X):
     """
-    Everything this stage needs is defined inside it: the helpers
+    Everything this stage needs is defined inside it and the helpers
     below are used by no other stage. The three that stage 7 also
     calls -- centre_by, hard_probe, cross_lingual_transfer -- are the
     exceptions, and live with the shared helpers at the top.
@@ -468,10 +459,16 @@ def stage_structure(recs, X):
         return Xc / np.clip(np.linalg.norm(Xc, axis=1, keepdims=True), 1e-9, None)
 
     def means_matrix(X, recs, field):
-        """One row per level, centred on the grand mean of those rows."""
+        """One row per level, centred on the grand mean of those rows"""
+        # Get the sorted values of the called field in the recs, e.g. for technique it might be euclid and frustenberg etc
         levels = sorted({r[field] for r in recs})
+        # for each value in the field, select them from the embedding matrix X, then get the average vector, stack them up
         M = np.stack([X[[i for i, r in enumerate(recs) if r[field] == lvl]].mean(0)
                       for lvl in levels])
+        # so then, M is the average vector per value in a field, then we remove the average across M, so we
+        # we get a matrix where each row is a centered average vector of the value of the given field
+        # Each row now represents how that level's average embedding
+        # differs from the average embedding across all levels
         return levels, M - M.mean(0)
 
     def basis(X, recs, field):
@@ -482,9 +479,13 @@ def stage_structure(recs, X):
 
     # ---------------------------------------------------------------- 1, 2
 
+    # this entire block is basically doing PCA-style analysis to say, if we get an average centered vector
+    # per value in our field, which directions explain the variance
     def spectrum(X, recs, field):
         levels, M = means_matrix(X, recs, field)
+        # get the singulat values, along each orthogonal direction
         s = np.linalg.svd(M, compute_uv=False)
+        # normalise so it's percentages
         var = s ** 2 / (s ** 2).sum()
         print(f"  {field}: {len(levels)} levels, rank <= {len(levels) - 1}")
         print("  variance fraction per component:")
@@ -501,7 +502,8 @@ def stage_structure(recs, X):
             print("  -> genuinely multidimensional; no single direction "
                   "dominates.")
 
-        # Which levels sit at the ends of the leading direction?
+        # Where do the group-mean vectors for each field value lie when
+        # projected onto the leading direction, i.e. PC1 above?
         U, _, _ = np.linalg.svd(M.T, full_matrices=False)
         proj = M @ U[:, 0]
         order = np.argsort(proj)
@@ -847,12 +849,6 @@ def stage_structure(recs, X):
 
     banner("STAGE 3: structural probes")
 
-    print(f"{len(recs)} records in the {ARM} arm, "
-          f"{X.shape[1]} dimensions")
-    for f in FACTORS:
-        print(f"  {f:<10} {dict(Counter(r[f] for r in recs))}")
-
-    XL = centre_by(X, recs, "language")
     XLoo = centre_by_loo(X, recs, "language")
 
     rule("1. Language subspace: how many dimensions?")
@@ -871,29 +867,18 @@ def stage_structure(recs, X):
 
     rule("5. Do terse and verbose give the same technique centroids?")
     centroid_agreement(X, recs)
-    print("\n  same, on language-centred embeddings:")
-    centroid_agreement(XL, recs)
+    print("\n  same, on language-centred embeddings (what stage 4 uses):")
+    centroid_agreement(XLoo, recs)
 
     rule("6. Probes with the task made hard")
     hard_probe(X, recs)
 
     rule("7. Pairwise similarity, raw space")
     within_vs_between(X, recs)
-    rule("   Pairwise similarity, language-centred (in-sample means)")
-    within_vs_between(XL, recs)
     rule("   Pairwise similarity, language-centred (leave-one-out means)")
     print("  The honest version: each record's offset is estimated without")
     print("  it. If the gap survives here, the centring result is real.")
     within_vs_between(XLoo, recs)
-    print("\n  Probe accuracy under each centring:")
-    for name, M in (("raw", X), ("in-sample", XL), ("leave-one-out", XLoo)):
-        row = []
-        for f in FACTORS:
-            y = LabelEncoder().fit_transform([r[f] for r in recs])
-            row.append(cross_val_score(
-                LogisticRegression(max_iter=3000), M, y, cv=5).mean())
-        print(f"  {name:<14} " + "  ".join(
-            f"{f}={a:.3f}" for f, a in zip(FACTORS, row)))
 
     rule("8. Null distribution for the subspace angles")
     angle_null(X, recs, "technique", "language")
@@ -993,10 +978,6 @@ def stage_centre(recs, X):
                        for k, i in cells.items()), reverse=True)
         rank = [k for _, k in sims].index(centre_key) + 1
 
-        print(f"  {'cell':32} {'cos':>7}")
-        for s, k in sims:
-            mark = "  <- centre cell" if k == centre_key else ""
-            print(f"  {k[0] + ':' + k[1]:32} {s:+7.3f}{mark}")
         print(f"\n  centre cell rank {rank} of {len(sims)}")
         if name == "raw":
             print("  Raw cosines span a narrow band -- bge-m3's anisotropy, not")
@@ -1138,12 +1119,6 @@ def stage_extreme(all_recs, X_all):
     C = np.stack([T[[k for k, j in enumerate(tech_i)
                      if recs[j]["technique"] == t]].mean(0) for t in techs])
     C /= np.clip(np.linalg.norm(C, axis=1, keepdims=True), 1e-9, None)
-    self_acc = np.mean(
-        np.argmax(T @ C.T, 1)
-        == np.array([techs.index(recs[j]["technique"]) for j in tech_i]))
-    print(f"  in-sample accuracy on the technique arm: {self_acc:.3f}")
-    print("  (sanity check only -- these are the records the centroids came")
-    print("   from. Stage 2's cross-style transfer is the honest number.)")
 
     # ---------------------------------------------------------------- 2
     rule("2. Assignment confidence on the extreme arm")
@@ -1204,12 +1179,6 @@ def stage_extreme(all_recs, X_all):
         m = best == a
         if m.sum():
             print(f"  {t:<18}{m.sum():>4}{z[m].mean():>16.2f}")
-    rho, p = spearmanr(best, z)
-    print(f"\n  Spearman(technique index, z-length) rho={rho:+.3f} p={p:.3f}")
-    print("  Technique index is nominal, so read this only as a crude")
-    print("  collinearity flag. The real check is the table above: if two")
-    print("  techniques sit at the same z-length but different directions")
-    print("  select them, the coordinates are independent.")
 
     # ---------------------------------------------------------------- 5
     rule("5. Per-direction detail, for eyeballing")
@@ -1309,1011 +1278,6 @@ def stage_extreme(all_recs, X_all):
     print("  subject matter rather than argument.")
 
 
-# ======================================================================
-# Stage 5: a second coordinate that is not lexical similarity
-#
-# Everything in stages 2-4 measures a proof by where its *wording* lands in
-# an embedding. That is what produced the central error of the analysis:
-# the machinery arm was assigned to Furstenberg 26/30, because Furstenberg
-# is the most abstract-VOCABULARY member of the reference set, while its
-# mathematics is Euclid's argument in topological dress and invokes no
-# theorem at all. A similarity measure cannot tell "uses abstract
-# terminology" from "uses powerful theorems".
-#
-# This stage builds the coordinate that can: the number of distinct named
-# external results a proof leans on. It is script-independent (section 1),
-# not a length proxy (sections 2 and 3), and not lexical (section 3).
-#
-# Together with the normalised length from stage 1 this gives two
-# coordinates that mean something, which is the minimum for the geometry in
-# Conway and Shipman's framing to be worth taking literally.
-#
-# One registry per theorem, chosen from the corpus's own `theorem` field.
-# The coordinate transfers between theorems; the registry cannot, because
-# what counts as an invoked result depends on what the proofs cite. Running
-# the wrong one is the failure mode this guards: the sqrt2 registry against
-# the primes corpus reports 0.85 invoked results where the right one
-# reports 16.63, which reads exactly like a null result and is not one.
-# ======================================================================
-
-
-# Registries checked against a real corpus. Anything else is a draft, and
-# the output says so.
-VALIDATED = {"infinitude_of_primes"}
-
-# The section-3 contrast, per theorem: the technique whose proof invokes
-# nothing but which the EMBEDDING confused with the machinery direction.
-# It cannot be picked as the minimum-dependence technique automatically --
-# on the primes corpus that would select euclid (0.05), and euclid is not
-# the record the embedding got wrong. It is corpus knowledge, so it is
-# stated, with the note that goes with it.
-CONTRAST = {
-    "infinitude_of_primes": (
-        "furstenberg",
-        ["The embedding assigned 26/30 machinery records to the",
-         "Furstenberg centroid, because Furstenberg has the most",
-         "abstract vocabulary in the reference set. But Furstenberg's",
-         "proof invokes no theorem -- only topological definitions.",
-         "If this coordinate is measuring dependence rather than",
-         "wording, it must separate them."],
-        0.133),
-}
-
-
-def stage_coordinates(all_recs, theorem, registry):
-    """
-    Helpers used by nothing else, kept inside the stage.
-    """
-
-
-    def find_invoked(text, compiled):
-        """
-        Return {canonical_name: [char offsets]} for every registry entry that
-        appears in the text. Offsets are kept so the refinement below can ask
-        what follows a mention.
-        """
-        hits = {}
-        for name, rx, subs in compiled:
-            pos = []
-            for r in rx:
-                pos.extend(m.start() for m in r.finditer(text))
-            for s in subs:
-                start = text.find(s)
-                while start != -1:
-                    pos.append(start)
-                    start = text.find(s, start + 1)
-            if pos:
-                hits[name] = sorted(pos)
-        return hits
-
-    def proved_in_place(text, offset, window=400):
-        """
-        Crude test for whether a mention is followed by its own proof: does a
-        proof marker appear within `window` characters after it?
-
-        This is the weakest part of the file and is reported separately for
-        that reason. It cannot tell "Theorem B (Hadamard). ... Proof of the
-        main result follows" from "Lemma 2 (Euler product). Proof. ...", and
-        the window is a guess.
-        """
-        seg = text[offset:offset + window]
-        return (any(r.search(seg) for r in PROOF_RX)
-                or any(s in seg for s in PROOF_SUBS))
-
-    def count_invoked(rec, compiled):
-        """
-        Two counts per record:
-
-          n_named   distinct named external results mentioned at all. The
-                    primary measure: it asks what the proof leans on.
-          n_cited   those with no proof environment nearby, i.e. quoted rather
-                    than established. Sharper in principle, noisier in practice.
-        """
-        text = rec["proof"]
-        hits = find_invoked(text, compiled)
-        n_cited = sum(
-            1 for name, positions in hits.items()
-            if not all(proved_in_place(text, p) for p in positions))
-        return len(hits), n_cited, hits
-
-    def norm_length(recs):
-        """Within-language z-score of log character length (stage 1 §3)."""
-        by_lang = defaultdict(list)
-        for r in recs:
-            by_lang[r["language"]].append(math.log(len(r["proof"])))
-        stats = {k: (st.mean(v), st.pstdev(v) or 1.0) for k, v in by_lang.items()}
-        out = []
-        for r in recs:
-            mu, sd = stats[r["language"]]
-            out.append((math.log(len(r["proof"])) - mu) / sd)
-        return out
-
-    banner("STAGE 5: the second coordinate -- named results invoked")
-    compiled = compile_registry(registry)
-
-    # The scope arm proves other theorems, so it is not comparable on either
-    # coordinate: a different statement changes both the length baseline and
-    # what there is to invoke. Reported on its own in section 6.
-    recs = [r for r in all_recs if r["arm"] != "scope"]
-    scope = [r for r in all_recs if r["arm"] == "scope"]
-
-    for group in (recs, scope):
-        if not group:
-            continue
-        counts = [count_invoked(r, compiled) for r in group]
-        for r, (n, c, _), z in zip(group, counts, norm_length(group)):
-            r["_named"], r["_cited"], r["_z"] = n, c, z
-
-    named = [r["_named"] for r in recs]
-    cited = [r["_cited"] for r in recs]
-
-    print(f"{len(recs)} records, theorem {theorem}, {len(registry)} named "
-          f"results in the registry")
-    if theorem not in VALIDATED:
-        print("  !! This registry is PROVISIONAL: it has not been checked")
-        print("     against a corpus. A low count here may be the registry")
-        print("     failing to recognise a name, not a proof invoking")
-        print("     nothing. Re-derive it from corpus token frequencies")
-        print("     before reporting any number from this run.")
-    print(f"mean distinct results invoked: {sum(named)/len(named):.2f}   "
-          f"(quoted-not-proved: {sum(cited)/len(cited):.2f})")
-
-    tech = [r for r in recs if r["arm"] == "technique"]
-    extr = [r for r in recs if r["arm"] == "extreme"]
-
-    # ---------------------------------------------------------------- 0
-    rule("0. Manipulation check: does the count order the directions?")
-    print("  Prediction from the prompts alone: elementarity forbids named")
-    print("  theorems, machinery demands them.")
-    print(f"  {'direction':<16}{'mean named':>12}{'mean cited':>12}"
-          f"{'median':>9}")
-    for d in sorted({r["direction"] for r in extr}):
-        g = [r for r in extr if r["direction"] == d]
-        print(f"  {d:<16}{st.mean([r['_named'] for r in g]):>12.2f}"
-              f"{st.mean([r['_cited'] for r in g]):>12.2f}"
-              f"{st.median([r['_named'] for r in g]):>9.1f}")
-
-    # ---------------------------------------------------------------- 1
-    rule("1. Is the count script-independent?")
-    n_tech = len({r["technique"] for r in tech})
-    langs = sorted({r["language"] for r in tech})
-    print(f"  The technique arm is a translation-matched grid: the same "
-          f"{n_tech}")
-    print(f"  arguments written in {len(langs)} languages. A "
-          f"script-independent")
-    print("  measure should give the same count for a cell in every one.")
-    print()
-    print("  Note on the statistic. The obvious test is the coefficient of")
-    print("  variation across languages, and it is the wrong one here:")
-    print("  most cells average under one invoked result, and CV divides by")
-    print("  that mean -- on the primes corpus euclid runs 0.10/0.10/0.00/")
-    print("  0.00/0.00/0.10 and scores CV 1.000 on an absolute spread of a")
-    print("  tenth of a result. Below, the absolute spread is the headline")
-    print("  and CV is shown only where the mean exceeds 1 and means")
-    print("  something.")
-    print(f"\n  {'technique':<18}{'mean':>7}{'max-min':>9}{'CV':>8}"
-          f"   per language ({' '.join(langs)})")
-    spreads = []
-    for t in sorted({r["technique"] for r in tech}):
-        per_lang = [st.mean([r["_named"] for r in tech
-                             if r["technique"] == t and r["language"] == l])
-                    for l in langs]
-        m = st.mean(per_lang)
-        spread = max(per_lang) - min(per_lang)
-        spreads.append(spread)
-        cv = f"{st.pstdev(per_lang) / m:>8.3f}" if m >= 1 else f"{'--':>8}"
-        print(f"  {t:<18}{m:>7.2f}{spread:>9.2f}{cv}   "
-              + " ".join(f"{v:.1f}" for v in per_lang))
-    print(f"\n  mean absolute spread across languages: "
-          f"{st.mean(spreads):.2f} results")
-
-    # The specific worry is a directional CJK penalty, not spread as such.
-    print("\n  The real worry is directional: does the registry simply read")
-    print("  CJK worse? Latin vs CJK means, on matched cells:")
-    print(f"  {'cell':<26}{'latin':>8}{'cjk':>8}{'ratio':>8}")
-    ratios = []
-    for arm_recs, key in ((tech, "technique"), (extr, "direction")):
-        for v in sorted({r[key] for r in arm_recs}):
-            lat = [r["_named"] for r in arm_recs
-                   if r[key] == v and r["language"] not in CJK]
-            cjk = [r["_named"] for r in arm_recs
-                   if r[key] == v and r["language"] in CJK]
-            ml, mc = st.mean(lat), st.mean(cjk)
-            if ml < 0.5 and mc < 0.5:
-                continue          # nothing to compare; both floor at zero
-            ratios.append(mc / ml if ml else float("nan"))
-            print(f"  {v:<26}{ml:>8.2f}{mc:>8.2f}{ratios[-1]:>8.2f}")
-    good = [r for r in ratios if r == r]
-    print(f"\n  median CJK/Latin ratio: {st.median(good):.2f}   "
-          f"(range {min(good):.2f}-{max(good):.2f})")
-    print("  The median is the honest summary: the mean is dragged by")
-    print("  generality at 2.47, where CJK proofs really do invoke more,")
-    print("  which is a fact about those proofs and not about the registry.")
-    print("  Above ~0.8 the registry is reading both scripts. The machinery")
-    print("  cell is the weakest: CJK proofs quote the most obscure results,")
-    print("  where localised name forms are least well covered, so some are")
-    print("  missed. That is a recall limit on the registry, not a script")
-    print("  bias in the coordinate -- and section 3 shows it is nowhere")
-    print("  near large enough to affect the distinction being drawn.")
-
-    # ---------------------------------------------------------------- 2
-    rule("2. Is it just length again?")
-    rho_all = spearmanr([r["_named"] for r in recs],
-                        [r["_z"] for r in recs]).statistic
-    rho_ext = spearmanr([r["_named"] for r in extr],
-                        [r["_z"] for r in extr]).statistic
-    print(f"  Spearman(count, normalised length), all {len(recs)}: "
-          f"{rho_all:+.3f}")
-    print(f"  Spearman(count, normalised length), extreme arm: "
-          f"{rho_ext:+.3f}")
-    print("  Substantially correlated, and on the extreme arm strongly so:")
-    print("  quoting theorems takes words, and the machinery proofs are")
-    print("  both the longest and the heaviest. So this coordinate is NOT")
-    print("  independent of length, and the claim that it adds information")
-    print("  rests on where the two disagree, not on the correlation being")
-    print("  low. The length-matched control in section 3 is the real test.")
-    print("\n  Where they disagree, within the extreme arm:")
-    present = {r["direction"] for r in extr}
-    for d in [x for x in ("elementarity", "generality", "machinery")
-              if x in present]:
-        g = [r for r in extr if r["direction"] == d]
-        print(f"    {d:<14} length z {st.mean([r['_z'] for r in g]):+.2f}"
-              f"   named results {st.mean([r['_named'] for r in g]):.2f}")
-    print("  Read the two columns against each other: where directions sit")
-    print("  at similar length but far apart in invoked results, length")
-    print("  alone cannot tell them apart and this coordinate can.")
-
-    # ---------------------------------------------------------------- 3
-    known, note, prior = CONTRAST.get(theorem, (None, None, None))
-    name = known
-    if name is None:
-        # No stated contrast for this theorem yet. Fall back to the
-        # lowest-dependence technique, and say that it is a stand-in: the
-        # real contrast is whichever technique the EMBEDDING confuses with
-        # machinery, and that is not knowable from this file.
-        name = min({r["technique"] for r in tech},
-                   key=lambda t: st.mean([r["_named"] for r in tech
-                                          if r["technique"] == t]))
-        note = [f"No contrast recorded for {theorem}, so this uses the",
-                f"lowest-dependence technique ({name}) as a stand-in. The",
-                "contrast that matters is whichever technique the embedding",
-                "confuses with machinery; read stage 4 first, then add it",
-                "to CONTRAST."]
-    rule(f"3. The test that matters: machinery vs {name}")
-    for line in note:
-        print(f"  {line}")
-    print()
-    furst = [r for r in tech if r["technique"] == name]
-    mach = [r for r in extr if r["direction"] == "machinery"]
-    fm = st.mean([r["_named"] for r in furst])
-    mm = st.mean([r["_named"] for r in mach])
-    print(f"  {name:<11} (technique arm, n={len(furst)}): "
-          f"mean {fm:.2f}  median {st.median([r['_named'] for r in furst])}")
-    print(f"  machinery   (extreme arm,   n={len(mach)}): "
-          f"mean {mm:.2f}  median {st.median([r['_named'] for r in mach])}")
-
-    # Best single threshold, and the accuracy it gives.
-    lo = [r["_named"] for r in furst]
-    hi = [r["_named"] for r in mach]
-    best_t, best_acc = None, 0.0
-    for t in range(0, max(hi + lo) + 2):
-        acc = (sum(1 for v in lo if v < t) + sum(1 for v in hi if v >= t))
-        acc /= len(lo) + len(hi)
-        if acc > best_acc:
-            best_t, best_acc = t, acc
-    print(f"\n  best single threshold: count >= {best_t} -> machinery")
-    if prior is not None:
-        print(f"  separation accuracy: {best_acc:.3f}  "
-              f"(embedding cosine: {prior:.3f}, it called 26/30 of them "
-              f"Furstenberg)")
-    else:
-        print(f"  separation accuracy: {best_acc:.3f}  "
-              f"(no embedding figure recorded for this theorem)")
-    if best_acc > 0.9:
-        print("  -> The coordinate makes the distinction the embedding")
-        print("     could not. Abstract vocabulary and heavy machinery are")
-        print("     different things, and this measures the second one.")
-
-    # Length-matched control. Section 2 found rho=+0.73 with length on the
-    # extreme arm, so "machinery scores high because it is long" has to be
-    # ruled out before the separation above means anything.
-    print("\n  Length-matched control. The count correlates with length, so")
-    print("  compare machinery against the LONGEST technique-arm records")
-    print("  instead of all of them -- same length, different dependence:")
-    tech_sorted = sorted(tech, key=lambda r: -r["_z"])[:len(mach)]
-    tz = st.mean([r["_z"] for r in tech_sorted])
-    tn = st.mean([r["_named"] for r in tech_sorted])
-    print(f"    longest {len(tech_sorted)} technique-arm records: "
-          f"length z {tz:+.2f}, invoked {tn:.2f}")
-    print(f"    machinery records:                    "
-          f"length z {st.mean([r['_z'] for r in mach]):+.2f}, "
-          f"invoked {mm:.2f}")
-    if tz >= st.mean([r["_z"] for r in mach]) and tn < mm / 2:
-        print("    -> At equal or greater length the reference records")
-        print("       invoke a fraction as much. The coordinate is not")
-        print("       length wearing a different hat.")
-
-    # ---------------------------------------------------------------- 4
-    rule("4. Two coordinates")
-    print("  Normalised length against invoked results, by direction.")
-    print("  This is the 2D space the write-up says is the minimum for the")
-    print("  geometry to be worth taking literally.\n")
-    print(f"  {'direction':<16}{'length z':>10}{'invoked':>9}   position")
-    rows = []
-    for d in sorted({r["direction"] for r in extr}):
-        g = [r for r in extr if r["direction"] == d]
-        rows.append((d, st.mean([r["_z"] for r in g]),
-                     st.mean([r["_named"] for r in g])))
-    med = st.median([r[2] for r in rows])
-    for d, z, n in sorted(rows, key=lambda x: -x[2]):
-        pos = "heavy" if n > med else "light"
-        pos += (", long" if z > 0.2 else
-                ", short" if z < -0.2 else ", average length")
-        print(f"  {d:<16}{z:>10.2f}{n:>9.2f}   {pos}")
-    if {"brevity", "elementarity"} <= {r[0] for r in rows}:
-        print("\n  brevity and elementarity are the same argument at "
-              "different")
-        print("  lengths and both invoke almost nothing -- they separate on")
-        print("  coordinate 1 and coincide on coordinate 2, which is what")
-        print("  the write-up claims about them from reading the proofs.")
-
-    # ---------------------------------------------------------------- 5
-    rule(f"5. What was matched: {SHOW_DIRECTION}")
-    print("  The registry is a hand-written list, so this is the section")
-    print("  that lets you check it against the proofs rather than trust")
-    print("  it. Twelve records, and what each one was counted for.")
-    for r in [x for x in recs if x.get("direction") == SHOW_DIRECTION][:12]:
-        _, _, hits = count_invoked(r, compiled)
-        print(f"  {r['id']:<28} {r['_named']:>2}  "
-              f"{', '.join(sorted(hits)) if hits else '(none)'}")
-
-    # ---------------------------------------------------------------- 6
-    if scope:
-        rule("6. Scope arm: does dependence track scope?")
-        print("  Each target is a statement the reference proofs do or do")
-        print("  not reach. Conway and Shipman's scope test says proofs")
-        print("  with different scopes are different proofs; if dependence")
-        print("  is a real coordinate, it should climb as the statement")
-        print("  moves out of reach of the light arguments.\n")
-        print(f"  {'target':<28}{'invoked':>9}{'length z':>10}")
-        for t in sorted({r["theorem"] for r in scope}):
-            g = [r for r in scope if r["theorem"] == t]
-            print(f"  {t:<28}{st.mean([r['_named'] for r in g]):>9.2f}"
-                  f"{st.mean([r['_z'] for r in g]):>10.2f}")
-        print("\n  The first target is the theorem of the other two arms,")
-        print("  asked with no selection criterion: the unprompted baseline")
-        print("  every extremal direction should be read against.")
-
-
-# ======================================================================
-# Stage 6: masking -- is technique identity carried by terminology?
-#
-# Stage 3 section 9 bounds the vocabulary confound from below: on the
-# primes corpus, TF-IDF word 1-2grams recover the technique at 0.940
-# against a chance of 0.200, and bge-m3 manages 0.980. A bag of words comes
-# within four points of the encoder. That is consistent with two very
-# different stories, and section 9 cannot separate them:
-#
-#   (a) the encoder reads the argument, and vocabulary happens to correlate
-#       with the argument well enough that counting words nearly matches;
-#   (b) the encoder reads the vocabulary, and there is no argument
-#       structure in the representation at all.
-#
-# The cross-language results do not settle it either, because the tokens
-# that give a technique away are the ones that are never translated.
-# "Furstenberg", "Fermat", the Euler product sign -- these appear
-# identically in the German and Chinese proofs. What looks like the encoder
-# aligning arguments across languages may be nothing more than it aligning
-# proper nouns.
-#
-# This stage removes technique-diagnostic vocabulary and lets the two
-# stories come apart. It rewrites the corpus with those terms replaced by
-# a single neutral placeholder, so that the masked corpus embeds through
-# embedding.py unchanged -- same records, same order, same row count -- and
-# stage 7 can compare the two spaces row by row.
-# ======================================================================
-
-
-PLACEHOLDER = "⟨m⟩"
-
-TIERS = {
-    "discriminative": ["discriminative"],
-}
-
-# Languages whose tokens the word analyser can find. Japanese and Chinese
-# are not space-delimited, so the discriminative tier scores character
-# n-grams for them instead of words -- see discriminative_terms.
-LATIN = {"en", "de", "es", "fr"}
-
-
-def stage_masking(recs, fields, theorem, registry, corpus: Path, tier,
-                  topk):
-    """
-    Helpers used by nothing else, kept inside the stage.
-    """
-
-    def analyser_for(lang):
-        if lang in LATIN:
-            return dict(analyzer="word", ngram_range=(1, 1))
-        return dict(analyzer="char_wb", ngram_range=(2, 4))
-
-    def discriminative_terms(recs, lang, topk):
-        """
-        The terms a classifier actually leans on, found from the data rather
-        than from a list of names.
-
-        The registry tiers above turn out to remove nothing: masking every
-        named theorem, every mathematician and every diagnostic symbol leaves
-        the TF-IDF baseline exactly where it was. So the technique label is not
-        carried by citations. It is carried by the ordinary descriptive
-        vocabulary that goes with an argument -- a topological proof says "open",
-        "cover", "clopen"; a counting proof says "at most", "square-free",
-        "bound" -- and no hand-written list will catch that, because the list
-        would have to enumerate the whole technical lexicon of each method.
-
-        This finds those terms directly: fit a linear model on TF-IDF, then take
-        the tokens with the largest weight for each technique.
-
-        The selection sees only the terse records, and the caller evaluates on
-        the verbose ones. That matters. Choosing the terms to mask by looking at the
-        labels of the very records you then test on would guarantee a collapse
-        and prove nothing -- the accuracy would be measuring the selection, not
-        the representation. Because the mask must be applied to the whole corpus
-        before embedding, this asymmetry cannot be made two-sided, so the
-        discriminative tier reports one direction only and says so.
-        """
-        i = [j for j, r in enumerate(recs)
-             if r["arm"] == "technique" and r["language"] == lang
-             and r["style"] == "terse"]
-        vec = TfidfVectorizer(min_df=2, **analyser_for(lang))
-        M = vec.fit_transform([recs[j]["proof"] for j in i])
-        y = LabelEncoder().fit_transform([recs[j]["technique"] for j in i])
-        clf = LogisticRegression(max_iter=3000).fit(M, y)
-        names = np.array(vec.get_feature_names_out())
-        W = np.atleast_2d(clf.coef_)
-        # max(1, ...): the curve sweeps k down to 5, and with six techniques
-        # 5 // 6 floors to zero, which would silently select no terms and put
-        # the unmasked accuracy in a row labelled "5 masked".
-        per = max(1, topk // len(W))
-        picked = []
-        for row in W:
-            picked += list(names[np.argsort(row)[::-1][:per]])
-        # Longest first, so "open cover" is consumed before "open".
-        #
-        # Alphabetical within a length, and that second key is load-bearing
-        # rather than tidiness. `sorted` is stable, so with `key=len` alone the
-        # order of equal-length terms is the iteration order of the set above,
-        # which Python derives from string hashes and randomises per process.
-        # Two runs would then disagree about which of two equally long terms
-        # sits either side of the [:topk] cut, so the masked corpus -- and the
-        # headline number taken from it -- would not reproduce. Breaking the
-        # tie on the term itself makes the selection a function of the corpus
-        # and topk alone.
-        return sorted(set(picked), key=lambda t: (-len(t), t))[:topk]
-
-    def build_groups(registry, which):
-        """
-        Compile the surface forms for the requested groups into one list of
-        (name, regexes, substrings), the same shape compile_registry produces.
-        """
-        out = []
-        if "names" in which:
-            out += [(f"name:{n}", *compile_forms(f)) for n, f in NAMES]
-        if "machinery" in which:
-            out += [(f"mach:{n}", *compile_forms(f)) for n, f in registry]
-        if "notation" in which:
-            out += [(f"notn:{n}", *compile_forms(f)) for n, f in NOTATION]
-        return out
-
-    def term_groups(terms, lang):
-        """
-        Compile data-driven terms into the same group shape. Latin-script terms
-        get word boundaries so that masking "open" does not also gut "opening";
-        CJK n-grams are matched as bare substrings, which is what they are.
-        """
-        out = []
-        for t in terms:
-            if lang in LATIN:
-                out.append((f"disc:{t}",
-                            [re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE)],
-                            []))
-            else:
-                out.append((f"disc:{t}", [], [t]))
-        return out
-
-    def spans(text, groups):
-        """
-        Every (start, end, group_name) match in the text, from all groups.
-
-        Overlaps are resolved longest-first so that "Euclid's lemma" is replaced
-        as one unit rather than leaving a fragment behind when the bare name
-        "Euclid" also matches inside it.
-        """
-        found = []
-        for name, rx, subs in groups:
-            for r in rx:
-                found += [(m.start(), m.end(), name) for m in r.finditer(text)]
-            for s in subs:
-                i = text.find(s)
-                while i != -1:
-                    found.append((i, i + len(s), name))
-                    i = text.find(s, i + 1)
-        found.sort(key=lambda t: (t[0], -(t[1] - t[0])))
-        kept, last = [], -1
-        for start, end, name in found:
-            if start >= last:
-                kept.append((start, end, name))
-                last = end
-        return kept
-
-    def mask_text(text, groups):
-        """Replace every matched span with PLACEHOLDER."""
-        for start, end, _ in reversed(spans(text, groups)):
-            text = text[:start] + PLACEHOLDER + text[end:]
-        return text
-
-    # ---------------------------------------------------------------- 1
-
-    def report_coverage(recs, counts):
-        """How much was masked, and how unevenly across techniques."""
-        tech = defaultdict(list)
-        for r, c in zip(recs, counts):
-            if r["arm"] == "technique":
-                tech[r["technique"]].append(c)
-        print(f"  {'technique':<20} {'masks/proof':>12} {'min':>5} {'max':>5}")
-        for t in sorted(tech):
-            v = tech[t]
-            print(f"  {t:<20} {np.mean(v):12.1f} {min(v):5} {max(v):5}")
-        allc = list(counts)
-        print(f"  {'ALL RECORDS':<20} {np.mean(allc):12.1f} {min(allc):5} "
-              f"{max(allc):5}")
-        zero = sum(1 for n in allc if n == 0)
-        print(f"  records with nothing masked: {zero}/{len(allc)}")
-
-    # ---------------------------------------------------------------- 2
-
-    def report_shrinkage(recs, masked):
-        """
-        Masking must not shorten the proofs differently by technique, or the
-        ablation trades a vocabulary confound for a length confound. Brevity is
-        one of the value functions under study, so length is not a nuisance
-        parameter here -- it is a coordinate.
-        """
-        by = defaultdict(list)
-        for r, m in zip(recs, masked):
-            if r["arm"] == "technique":
-                by[r["technique"]].append(len(m) / len(r["proof"]))
-        print(f"  {'technique':<20} {'length kept':>12}")
-        for t in sorted(by):
-            print(f"  {t:<20} {np.mean(by[t]):12.3f}")
-
-    # ---------------------------------------------------------------- 3
-
-    def leak_check(recs, counts, masked, lang="en"):
-        """
-        The control that decides whether the ablation means anything.
-
-        Masking leaves a hole of a known size. Even with the words gone, the
-        text still says how many terms were removed and where they sat, and a
-        proof carrying six hundred placeholders is not the same object as one
-        carrying eighty. If technique can be read off that alone, the masked
-        corpus still carries its label and a high masked accuracy would say
-        nothing about argument structure.
-
-        The features here are restricted to what a reader of the masked text can
-        actually see: how many placeholders, how long the text is, how dense the
-        placeholders are. Crucially NOT which term each placeholder replaced --
-        every one of them is the same string, so that information is not in the
-        corpus that gets embedded. An earlier version of this check used the
-        per-term counts and reported a leak of 0.90 on the discriminative tier,
-        which was an artefact of the check rather than a property of the data:
-        it was classifying from the mask log, not from the masked proofs.
-
-        Trains on terse and tests on verbose, and the reverse, matching
-        stage 3 section 9 so the numbers sit on the same scale.
-        """
-        i = [j for j, r in enumerate(recs)
-             if r["arm"] == "technique" and r["language"] == lang]
-        y = LabelEncoder().fit_transform([recs[j]["technique"] for j in i])
-        styles = [recs[j]["style"] for j in i]
-        chance = 1 / len(set(y))
-        print(f"  {len(i)} records in '{lang}', chance {chance:.3f}")
-
-        def observable(j):
-            n, L = counts[j], len(masked[j])
-            return [n, L, n / L, len(recs[j]["proof"]) / L]
-
-        V = np.array([observable(j) for j in i], dtype=float)
-
-        def score(F):
-            accs = []
-            for tr_s, te_s in (("terse", "verbose"), ("verbose", "terse")):
-                tr = [k for k, s in enumerate(styles) if s == tr_s]
-                te = [k for k, s in enumerate(styles) if s == te_s]
-                clf = LogisticRegression(max_iter=3000).fit(F[tr], y[tr])
-                accs.append(clf.score(F[te], y[te]))
-            return float(np.mean(accs))
-
-        acc = score(V)
-        print(f"  technique from placeholder COUNT + length {acc:.3f}")
-        print(f"  technique from COUNT alone                "
-              f"{score(V[:, :1]):.3f}")
-        if acc > chance * 2:
-            print("  -> the hole leaks. Masked-text accuracy is an upper bound")
-            print("     on structure and cannot be read as evidence for it.")
-        else:
-            print("  -> the hole carries little; the masked text is a fair test.")
-        print("  (for reference, not a leak the encoder can exploit: every")
-        print("   placeholder is the same string, so which term was removed is")
-        print("   absent from the corpus that gets embedded.)")
-
-    # ---------------------------------------------------------------- 4
-
-    def tfidf_on_masked(recs, masked, lang="en"):
-        """
-        The result available without re-embedding anything.
-
-        Section 9 asked whether TF-IDF recovers technique from the original
-        text; it does, at 0.940. Asking the same question of the masked text
-        says how much surface signal the masking actually removed. If TF-IDF
-        stays high, the masking failed and there is no point embedding the
-        result. If it falls to chance, the masked corpus is a real test, and
-        whatever the encoder scores on it is about something other than words.
-        """
-        i = [j for j, r in enumerate(recs)
-             if r["arm"] == "technique" and r["language"] == lang]
-        y = LabelEncoder().fit_transform([recs[j]["technique"] for j in i])
-        styles = [recs[j]["style"] for j in i]
-        print(f"  {len(i)} records in '{lang}', chance {1/len(set(y)):.3f}")
-
-        for label, texts in (("original", [recs[j]["proof"] for j in i]),
-                             ("masked", [masked[j] for j in i])):
-            for kind, kw in (("word 1-2gram",
-                              dict(analyzer="word", ngram_range=(1, 2))),
-                             ("char 3-5gram",
-                              dict(analyzer="char_wb", ngram_range=(3, 5)))):
-                accs = []
-                for tr_s, te_s in (("terse", "verbose"), ("verbose", "terse")):
-                    tr = [k for k, s in enumerate(styles) if s == tr_s]
-                    te = [k for k, s in enumerate(styles) if s == te_s]
-                    pipe = make_pipeline(
-                        TfidfVectorizer(min_df=2, **kw),
-                        LogisticRegression(max_iter=3000))
-                    pipe.fit([texts[k] for k in tr], y[tr])
-                    accs.append(pipe.score([texts[k] for k in te], y[te]))
-                print(f"  {label:<9} tfidf {kind:<14} {np.mean(accs):.3f}")
-
-    # ---------------------------------------------------------------- 5
-
-    def ablation_curve(recs, base_groups, lang, ks):
-        """
-        Accuracy against how much vocabulary has been taken away.
-
-        A single masked number is hard to read: if accuracy stays high, was the
-        mask too small, or is there real structure? The curve settles it by
-        shape rather than by level. Two extremes bracket the answer:
-
-          a cliff        Technique rests on a few keywords. Masking the top
-                         handful drops accuracy to chance, and the "structure"
-                         in the representation was a lookup table.
-          a slope        Technique is spread across the whole technical lexicon.
-                         Every token removed costs a little and none is
-                         decisive. This is the more interesting outcome, and it
-                         is genuinely ambiguous: an argument and the words used
-                         to state it are not separable in prose, so a gentle
-                         slope is as consistent with the encoder tracking the
-                         mathematics as with it tracking diffuse wording.
-
-        Trains on terse, tests on verbose, one direction only, because the terms
-        were selected on terse -- see discriminative_terms.
-        """
-        i = [j for j, r in enumerate(recs)
-             if r["arm"] == "technique" and r["language"] == lang]
-        y_all = LabelEncoder().fit_transform([recs[j]["technique"] for j in i])
-        styles = [recs[j]["style"] for j in i]
-        tr = [k for k, s in enumerate(styles) if s == "terse"]
-        te = [k for k, s in enumerate(styles) if s == "verbose"]
-        print(f"  {len(i)} records in '{lang}', chance "
-              f"{1/len(set(y_all)):.3f}, train terse -> test verbose")
-        print(f"  {'top-k masked':>14} {'tfidf':>8} {'kept':>8} "
-              f"{'example terms'}")
-        for k in ks:
-            terms = discriminative_terms(recs, lang, k) if k else []
-            groups = base_groups + term_groups(terms, lang)
-            texts, kept = [], []
-            for j in i:
-                m = mask_text(recs[j]["proof"], groups)
-                texts.append(m)
-                kept.append(len(m) / len(recs[j]["proof"]))
-            pipe = make_pipeline(TfidfVectorizer(min_df=2, **analyser_for(lang)),
-                                LogisticRegression(max_iter=3000))
-            pipe.fit([texts[k2] for k2 in tr], y_all[tr])
-            acc = pipe.score([texts[k2] for k2 in te], y_all[te])
-            ex = ", ".join(terms[:3]) if terms else "(none)"
-            print(f"  {k:>14} {acc:8.3f} {np.mean(kept):8.3f}  {ex}")
-
-    # ---------------------------------------------------------------- 6
-
-    def excerpts(name, lang, groups, texts, limit=2, pad=45):
-        """A little context around the first few matches, for eyeballing."""
-        entry = next((g for g in groups if g[0] == name), None)
-        if entry is None:
-            return []
-        _, rx, subs = entry
-        out = []
-        for t in texts[lang]:
-            spots = [m.start() for r in rx for m in [r.search(t)] if m]
-            spots += [t.find(s) for s in subs if s in t]
-            if spots:
-                i = min(spots)
-                out.append(t[max(0, i - pad):i + pad].replace("\n", " "))
-            if len(out) >= limit:
-                break
-        return out
-
-    def audit(recs, groups, min_en=5):
-        """
-        Whether the hand-written lists are any good, measured against the corpus
-        rather than asserted.
-
-        NAMES and NOTATION were written from memory, and the sqrt2 and Pythagoras
-        registries in stage 5 are marked PROVISIONAL by that stage's own
-        VALIDATED set. A list nobody has checked fails in two directions, and the
-        two look identical in the headline number:
-
-          false negatives  A term the proofs use and the list misses. Masking
-                           then removes less than it claims, and a null result
-                           ("masking changed nothing") is indistinguishable from
-                           an incomplete list. This is the failure that would
-                           make the registry-tier null meaningless.
-          false positives  A pattern that matches ordinary text. This corrupts
-                           the masked corpus by deleting words the proof needed,
-                           and it does so silently.
-
-        The per-language counts catch both, because the same mathematics is being
-        written six times. An entry that fires in every language at a similar
-        rate is doing its job.
-
-        An entry that fires in exactly one language is AMBIGUOUS, and this was
-        got wrong once already. Both of these look identical in the counts:
-
-          a collision      "Tales" is Thales in Spanish and also the ordinary
-                           Spanish word for "such". It took 24 hits in the
-                           Spanish primes proofs and none of them was Thales.
-                           The mask was deleting a function word.
-          a coverage gap   The Chinese proofs say 剪拼 for scissors-congruence
-                           and the English ones say "dissection", which the
-                           registry does not list. The entry is correct; the
-                           other five languages' forms are missing. Fixing this
-                           means adding forms, not removing one.
-
-        Nothing in the counts separates those, so this prints an excerpt from
-        each flagged entry rather than reporting a verdict it cannot support.
-        Read the excerpt: if the match is ordinary prose, it is a collision; if
-        it is the mathematics, the entry is right and its siblings are absent.
-        """
-        langs = sorted({r["language"] for r in recs})
-        texts = defaultdict(list)
-        for r in recs:
-            texts[r["language"]].append(r["proof"])
-
-        rows, dead, suspect, gaps = [], [], [], []
-        for name, rx, subs in groups:
-            row = {}
-            for l in langs:
-                row[l] = sum(
-                    1 for t in texts[l]
-                    if any(r.search(t) for r in rx) or any(s in t for s in subs))
-            total = sum(row.values())
-            if total == 0:
-                dead.append(name)
-                continue
-            rows.append((name, row, total))
-            firing = [l for l in langs if row[l]]
-            if len(firing) == 1 and row[firing[0]] >= 3:
-                suspect.append((name, firing[0], row[firing[0]]))
-            elif row.get("en", 0) >= min_en and not (row.get("ja", 0)
-                                                     or row.get("zh", 0)):
-                gaps.append((name, row.get("en", 0)))
-
-        print(f"  {'entry':<24} " + " ".join(f"{l:>5}" for l in langs))
-        for name, row, _ in sorted(rows, key=lambda t: -t[2]):
-            print(f"  {name:<24} " + " ".join(f"{row[l]:5}" for l in langs))
-
-        print(f"\n  never matched ({len(dead)}): harmless here, but unvalidated. "
-              f"Entries for\n  another theorem's proofs are expected to sit at "
-              f"zero on this corpus.")
-        if dead:
-            print("    " + ", ".join(sorted(dead)))
-
-        print(f"\n  FIRES IN ONE LANGUAGE ONLY ({len(suspect)}): needs an eye, "
-              f"not a verdict.")
-        print("  Either a collision with an ordinary word in that language, or a")
-        print("  correct entry whose other five forms are missing. The excerpt")
-        print("  below decides which; the counts cannot.")
-        if suspect:
-            for name, l, n in suspect:
-                print(f"\n    {name}: {n} hits, all in '{l}'")
-                for ex in excerpts(name, l, groups, texts, limit=2):
-                    print(f"      ...{ex}...")
-        else:
-            print("    none.")
-
-        print(f"\n  LIKELY MISSING TRANSLITERATIONS ({len(gaps)}): in English, "
-              f"absent in ja and zh.")
-        if gaps:
-            for name, n in gaps:
-                print(f"    {name} -- {n} English records, nothing in CJK")
-        else:
-            print("    none.")
-
-    banner("STAGE 6: masking")
-    groups = build_groups(registry, TIERS[tier])
-    print(f"theorem  {theorem}")
-    print(f"tier     {tier}  ({', '.join(TIERS[tier])})")
-    print(f"patterns {len(groups)} groups")
-
-    out = corpus.with_name(f"{corpus.stem}.masked-{tier}.jsonl")
-    if out.exists():
-        # Masking is deterministic, so a corpus already on disk is the one
-        # this run would have written. Reading it back skips the whole
-        # tier -- on `discriminative` that is a classifier fit per
-        # language, the slowest thing in the file. Delete the .jsonl to
-        # force a rebuild after changing a table or a topk.
-        print(f"reusing   {out.name}")
-        masked = [json.loads(l)["proof"] for l in out.open() if l.strip()]
-    else:
-        # Per language: the tokens a linear classifier leans on for each
-        # technique. ja/zh use character n-grams rather than words.
-        per_lang = {}
-        if "discriminative" in TIERS[tier]:
-            for lg in sorted({r["language"] for r in recs}):
-                terms = discriminative_terms(recs, lg, topk)
-                per_lang[lg] = term_groups(terms, lg)
-                print(f"  {lg}: {len(terms)} terms, e.g. "
-                      f"{', '.join(terms[:5])}")
-
-        masked = [mask_text(r["proof"], groups + per_lang.get(r["language"], []))
-                  for r in recs]
-
-        # `fields` and not `r` directly: the earlier stages annotated
-        # these records in place, and a masked corpus carrying this run's
-        # z-scores and invoked-results counts would not be the input the
-        # unmasked one was.
-        with out.open("w") as f:
-            for r, m in zip(recs, masked):
-                rec = {k: v for k, v in r.items() if k in fields}
-                f.write(json.dumps({**rec, "proof": m,
-                                    "proof_original": r["proof"],
-                                    "mask_tier": tier},
-                                   ensure_ascii=False) + "\n")
-        print(f"wrote     {out.name} ({len(recs)} records, input order)")
-
-    # One placeholder per masked span, so this is the count either way --
-    # computed here or read back off the text.
-    counts = [m.count(PLACEHOLDER) for m in masked]
-
-    rule("1. Masking coverage")
-    report_coverage(recs, counts)
-
-    rule("2. Length kept after masking")
-    report_shrinkage(recs, masked)
-
-    rule("3. Does the hole leak the label?")
-    leak_check(recs, counts, masked, LANG)
-
-    rule("4. Lexical baseline, original vs masked")
-    tfidf_on_masked(recs, masked, LANG)
-
-    if "discriminative" in TIERS[tier]:
-        # Only worth sweeping on the tier where masking does something.
-        # Re-masks the corpus once per k -- the slow part of the run.
-        rule("5. Ablation curve: accuracy against vocabulary removed")
-        ablation_curve(recs, groups, LANG,
-                       [0, 5, 10, 25, 50, 100, 200, 400])
-
-    if groups:
-        rule("6. Audit: do the hand-written lists match the corpus?")
-        audit(recs, groups)
-
-    return out
-
-
-def stage_ablation(recs, X, masked_corpus: Path):
-    """
-    The comparison itself, kept inside the stage.
-    """
-
-    # ---------------------------------------------------------------- 14
-
-    def masked_ablation(X, recs, Xm, recs_m):
-        """
-        The unmasked and masked spaces side by side.
-
-        Stage 6 writes the masked corpus in the same order as the original, so
-        the two embedding matrices are row-aligned and every statistic in this
-        file can be recomputed on both. Read the columns, not the absolute
-        numbers: what matters is how far each figure falls when the terminology
-        goes away.
-
-        How to read the technique probe row:
-
-          falls to chance      technique identity was terminology. The encoder
-                               was matching words, and the cross-language
-                               result in section 11 was proper-noun alignment.
-          holds up             something survives the vocabulary -- but check
-                               stage 6 section 3 first. If the mask counts leak
-                               the label, the encoder may be reading the holes.
-          falls part way       the honest and most likely outcome. The drop is
-                               the lexical contribution; what is left is the
-                               ceiling on everything else.
-
-        The language probe is the control. Masking removes mathematical
-        terminology, not prose, so language should be largely unaffected. If the
-        language probe drops as much as the technique probe, the masking is
-        damaging the text in general rather than removing the label.
-        """
-        idx = [i for i, r in enumerate(recs_m) if r["arm"] == ARM]
-        recs_m = [recs_m[i] for i in idx]
-        Xm = Xm[idx]
-        tier = recs_m[0]["mask_tier"]
-        print(f"  masking tier: {tier}")
-
-        print("\n  5-fold probe accuracy, raw space")
-        print(f"  {'factor':<12} {'unmasked':>10} {'masked':>10} {'drop':>8} "
-              f"{'chance':>8}")
-        for f in FACTORS:
-            y = LabelEncoder().fit_transform([r[f] for r in recs])
-            a = cross_val_score(LogisticRegression(max_iter=3000), X, y,
-                                cv=5).mean()
-            b = cross_val_score(LogisticRegression(max_iter=3000), Xm, y,
-                                cv=5).mean()
-            ch = 1 / len(set(y))
-            print(f"  {f:<12} {a:10.3f} {b:10.3f} {a - b:+8.3f} {ch:8.3f}")
-
-        print("\n  The same, with the task made hard (one record per cell)")
-        for label, M in (("unmasked", X), ("masked", Xm)):
-            print(f"  {label}:")
-            hard_probe(M, recs)
-
-        print("\n  Pairwise cosine gaps (language-centred)")
-        print(f"  {'factor':<12} {'unmasked':>10} {'masked':>10} {'drop':>8}")
-        XL, XmL = centre_by(X, recs, "language"), centre_by(Xm, recs, "language")
-        for f in FACTORS:
-            gaps = []
-            for M in (XL, XmL):
-                S = M @ M.T
-                iu = np.triu_indices(len(M), 1)
-                same = np.array([recs[i][f] == recs[j][f]
-                                 for i, j in zip(*iu)])
-                gaps.append(S[iu][same].mean() - S[iu][~same].mean())
-            print(f"  {f:<12} {gaps[0]:10.3f} {gaps[1]:10.3f} "
-                  f"{gaps[0] - gaps[1]:+8.3f}")
-
-        print("\n  Cross-lingual transfer on the masked space")
-        print("  Item 11 on the masked corpus. This is the sharpest single")
-        print("  number here: proper nouns and notation are the tokens that are")
-        print("  never translated, so if cross-lingual transfer was riding on")
-        print("  them, it collapses when they are gone.")
-        cross_lingual_transfer(Xm, recs)
-
-    """
-    Stage 3's figures recomputed on the masked space, printed beside the
-    unmasked ones. Needs the masked corpus embedded, which is a separate
-    run of embedding.py, so this stage is skipped with instructions rather
-    than treated as an error when the cache is absent.
-    """
-    banner("STAGE 7: masking ablation")
-    mcache = cache_for(masked_corpus)
-    if not mcache.exists():
-        print(f"  Skipped: {mcache} not found. Embed the masked corpus,")
-        print("  then re-run to get this stage:")
-        print(f"    python analysis/embedding.py --corpus {masked_corpus}")
-        return
-    recs_m = [json.loads(l) for l in masked_corpus.open() if l.strip()]
-    rule("14. Masking ablation: is the technique signal lexical?")
-    masked_ablation(X, recs, np.load(mcache), recs_m)
-
 
 def main():
     """
@@ -2329,7 +1293,6 @@ def main():
 
         recs, fields = load(corpus)
         X = load_embeddings(cache_for(corpus))
-        registry = REGISTRIES[theorem]
 
 
         # The technique arm is the labelled part -- the only arm that says
@@ -2368,15 +1331,6 @@ def main():
         # 4. The question the corpus was built for: which known argument
         #    does the model reach for when asked for a vertex?
         stage_extreme(recs, X)
-
-        # 5. The coordinate that is not wording -- named results invoked
-        #    -- which separates heavy machinery from abstract vocabulary
-        #    where stage 4's cosine could not.
-        stage_coordinates(recs, theorem, registry)
-
-        masked = stage_masking(recs, fields, theorem, registry, corpus,
-                               "discriminative", TOPK[corpus.name])
-        stage_ablation(arm_recs, arm_X, masked)
 
 
 if __name__ == "__main__":
