@@ -18,6 +18,7 @@ Reads all three corpora and their cached embeddings and prints every analysis st
                           and the scope test.
 """
 
+
 import json
 import math
 import statistics as st
@@ -30,7 +31,6 @@ import numpy as np
 from scipy.stats import chi2_contingency
 from sklearn.decomposition import PCA
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import silhouette_score
 from sklearn.model_selection import cross_val_predict, cross_val_score
 from sklearn.preprocessing import LabelEncoder
 
@@ -42,9 +42,6 @@ from embedding import cache_for
 
 # The labelled arm the instrument can be validated on.
 ARM = "technique"
-
-# Language used in masking
-LANG = 'en'
 
 # non-latin character languages
 CJK = {"ja", "zh"}
@@ -63,14 +60,13 @@ def banner(t):
 def load(corpus: Path):
     with corpus.open() as f:
         recs = [json.loads(l) for l in f if l.strip()]
-    fields = set().union(*(r.keys() for r in recs))
     for r in recs:
         r["chars"] = len(r["proof"])
         r["log_chars"] = math.log(r["chars"])
     print(f"{len(recs)} records from {corpus}")
     for arm, n in Counter(r["arm"] for r in recs).items():
         print(f"  {arm:10} {n}")
-    return recs, fields
+    return recs
 
 
 def load_embeddings(cache: Path):
@@ -104,16 +100,6 @@ def stage_lengths(recs):
             per_cell[(r["direction"], r["language"])].add(r["prompt"])
     bad = {k: len(v) for k, v in per_cell.items() if len(v) != 1}
     print(f"cells w/ mixed prompt  {len(bad)}" + (f"  {bad}" if bad else ""))
-
-
-    rule("1. Raw length by extremal direction (characters, pooled over languages)")
-    d = defaultdict(list)
-    for r in recs:
-        if r["arm"] == "extreme":
-            d[r["direction"]].append(r["chars"])
-    for k, v in sorted(d.items(), key=lambda kv: st.median(kv[1])):
-        print(f"  {k:14} median {st.median(v):7.0f}   n={len(v)}")
-    print("  Pooled over scripts, so this axis still carries the language effect.")
 
     # within (direction, language) how much variation in length do we see in the samples (e.g. n=5)
     rule("2. Cell medians and within-cell variation")
@@ -204,7 +190,6 @@ def stage_lengths(recs):
 
 # theorem: n points in general position in 𝑅^𝑑 can be split by a hyperplane for any binary labelling as long as 
 # 𝑛 ≤ 𝑑 + 1
-# 
 # ======================================================================
 
 
@@ -212,34 +197,6 @@ def stage_probes(recs, X):
     # recs is the corpus, before embedding
     # X is the embeddings matrix of the corpus
     banner("STAGE 2: linear probes on the embedding")
-
-
-    # A linear probe here is just saying, can we linearly seperate the factors
-    def probe(M, y, name):
-        """5-fold CV accuracy of a linear probe against chance"""
-        # encode our labels y
-        yi = LabelEncoder().fit_transform(y)
-        k = len(set(yi))
-        # fit a linear probe f(x) = Ax + b with 5 folds (5 chunks of train and tests) composed with softmax
-        # "logistic" because it models log-odds as linear: log(p/(1-p)) = Ax + b
-        # then use log-loss to train, capped at 3000 iters.
-        # then average the accuracy
-        acc = cross_val_score(LogisticRegression(max_iter=3000), M, yi,
-                              cv=5).mean()
-        # silhouette measures clustering by pairwise distances
-        # for each point i:
-        #   a(i) = mean distance to the other points in its OWN group
-        #   b(i) = mean distance to the nearest OTHER group
-        #   s(i) = (b - a) / max(a, b),  averaged over all points.
-        # near 1  means own group far closer than any other
-        #  0  means it's in no man's land
-        # near -1 means it's closer to another group than to its own
-        # Note this is a different question from the probe's, that is,  classes can be
-        # perfectly separable by a hyperplane and still score near 0 here
-        # (think about long parallel stripes, not round blobs)
-        sil = silhouette_score(M, yi)
-        print(f"  {name:<10} k={k}  acc={acc:.3f}  chance={1/k:.3f}  "
-              f"lift={acc - 1/k:+.3f}  silhouette={sil:+.3f}")
 
     # leave-one-langauge-out, linear probe
     def lolo(M, y, groups):
@@ -275,47 +232,11 @@ def stage_probes(recs, X):
     XT = X[idx]
     print(f"\nScoring on the technique arm: {len(T)} labelled records")
 
-    # ---------------------------------------------------------------- 1
-    print("\n1. Pooled linear probe (5-fold cross validation)")
-    for f in FACTORS:
-        probe(XT, [r[f] for r in T], f)
-
     # ---------------------------------------------------------------- 2
     # Pooled CV cannot separate "technique separates within every language"
     # from "technique separates in English only". This can.
     print("\n2. Leave-one-language-out probe, target = technique")
     lolo(XT, [r["technique"] for r in T], [r["language"] for r in T])
-
-    # ---------------------------------------------------------------- 3
-    # Which factor dominates the local geometry - for each record, the
-    # fraction of its k nearest neighbours sharing each label (but take only one sample from each cell)
-    # use 10-nearest neigbhours
-    KNN = 10
-    print(f"\n3. Neighbourhood composition (k={KNN}, same-cell excluded)")
-    # get the dot-product of every embedding in the techniques, so we can read off cosine similarity
-    S = XT @ XT.T
-    # create a boolean nxn of cells we want to mask
-    cell = [(r["technique"], r["language"], r["style"]) for r in T]
-    same_cell = np.array([[a == b for b in cell] for a in cell])
-    S[same_cell] = -np.inf          # mask set similarity for same cell as negative infinity, including itself ie diagonals
-    # sort by values but return indices, -S makes it descending, axis=1 sorts within row, then keep the first KNN columns
-    nn = np.argsort(-S, axis=1)[:, :KNN]
-    for field in FACTORS:
-        # the vakues of this field, e.g. euclid as your technique in the infintude of the primes
-        vals = [r[field] for r in T]
-        # of the 10 nearest neigbhours, get the percent (mean of boolean values) that are the same technqieue for e.g.,
-        # and do this across the values in your factor (.e.g across technique factor, what is the average percent
-        # agreement with 10 nearest neighbours)
-        share = np.mean([np.mean([vals[j] == vals[i] for j in nn[i]])
-                         for i in range(len(T))])
-        # Chance that two records drawn at random share a label:
-        # sum_c n_c(n_c - 1) / n(n - 1). this handles class imbalance unlike
-        # the 1/k used in probe()
-        base = sum(c * (c - 1) for c in Counter(vals).values()) / (
-            len(T) * (len(T) - 1))
-        print(f"  {field:<10} same-label among {KNN}-NN: {share:.3f}  "
-              f"(baseline {base:.3f}  lift {share - base:+.3f}  "
-              f"ratio {share / base:.2f}x)")
 
 
 # ======================================================================
@@ -349,19 +270,6 @@ def stage_probes(recs, X):
 #  12. within_language     Technique clustering with language held fixed.
 #  13. extremal_ranking    Techniques ranked by centroid distance.
 # ======================================================================
-
-
-def centre_by(X, recs, field):
-    """Subtract the mean embedding of each level of `field`, renormalise."""
-    Xc = X.copy()
-    for lvl in {r[field] for r in recs}:
-        i = [j for j, r in enumerate(recs) if r[field] == lvl]
-        Xc[i] -= Xc[i].mean(axis=0)
-    n = np.linalg.norm(Xc, axis=1, keepdims=True)
-    return Xc / np.clip(n, 1e-9, None)
-
-
-# ---------------------------------------------------------------- 6
 
 
 def hard_probe(X, recs, seed=0):
@@ -433,12 +341,6 @@ def cross_lingual_transfer(X, recs, train_lang="en"):
 
 
 def stage_structure(recs, X):
-    """
-    Everything this stage needs is defined inside it and the helpers
-    below are used by no other stage. The three that stage 7 also
-    calls -- centre_by, hard_probe, cross_lingual_transfer -- are the
-    exceptions, and live with the shared helpers at the top.
-    """
 
     def centre_by_loo(X, recs, field):
         """
@@ -767,35 +669,6 @@ def stage_structure(recs, X):
         print("  -> positive: notation carries the mathematics, prose the "
               "language.")
 
-    # ---------------------------------------------------------------- 12
-
-    def within_language(X, recs):
-        """
-        Technique structure with language held fixed. If technique clusters
-        inside a single language, the structure is not a language artifact.
-
-        Probe accuracy is NOT reported here. Fifty records in 1024 dimensions
-        are linearly separable almost regardless of the labels -- the probe
-        reads 1.000 in every language and carries no information (section 6
-        makes the same point at length). The unsupervised scores do carry
-        information, and they vary a lot: technique clusters far more cleanly
-        in ja than in zh, which is not what a purely lexical account predicts.
-        """
-        from sklearn.cluster import KMeans
-        from sklearn.metrics import (normalized_mutual_info_score,
-                                     adjusted_rand_score, silhouette_score)
-
-        print(f"  {'language':<10}{'n':>5}{'NMI':>9}{'ARI':>9}{'silhouette':>13}")
-        for lang in sorted({r["language"] for r in recs}):
-            i = [j for j, r in enumerate(recs) if r["language"] == lang]
-            y = LabelEncoder().fit_transform([recs[j]["technique"] for j in i])
-            km = KMeans(n_clusters=len(set(y)), n_init=10,
-                        random_state=0).fit(X[i])
-            print(f"  {lang:<10}{len(i):>5}"
-                  f"{normalized_mutual_info_score(y, km.labels_):>9.3f}"
-                  f"{adjusted_rand_score(y, km.labels_):>9.3f}"
-                  f"{silhouette_score(X[i], y):>13.3f}")
-
     # ---------------------------------------------------------------- 13
 
     def extremal_ranking(X, recs):
@@ -893,102 +766,8 @@ def stage_structure(recs, X):
     rule("11. Cross-lingual transfer, raw embeddings")
     cross_lingual_transfer(X, recs)
 
-    rule("12. Technique structure with language held fixed")
-    within_language(X, recs)
-
     rule("13. Extremal ranking of the techniques")
     extremal_ranking(X, recs)
-
-
-# ======================================================================
-# Stage 3b: is the centre of the grid the centre cell?
-#
-# Numbered 3b rather than 4 on purpose: the README indexes stages 1-7 by
-# number, and this is a question that only became askable once stage 3
-# showed language is a removable additive offset. It runs on the same two
-# objects stage 3 does and adds no estimate anything downstream uses.
-#
-# Stage 1 section 6 found the centre cell on the length axis -- the scope
-# arm's own-theorem target, asked with no selection criterion. That is a
-# cell the corpus contains. The centroid of the whole grid is a different
-# object: the mean of every technique and extreme record, a point no
-# prompt targeted. If the extremal directions really do surround a
-# default, the two should land in the same place.
-#
-# Raw cosines are reported but should not be read: bge-m3 is anisotropic
-# enough that every cell pair sits above 0.75, so only the ranking carries
-# information. The language-centred column is the one that means anything.
-# ======================================================================
-
-
-def stage_centre(recs, X):
-    banner("STAGE 3b: the centre of the grid")
-
-    def cells_of(recs):
-        """
-        Name every cell the corpus contains, by the factor that defines
-        it: direction for the extreme arm, technique for the labelled
-        arm, target statement for the scope arm.
-        """
-        out = defaultdict(list)
-        for i, r in enumerate(recs):
-            if r["arm"] == "scope":
-                out[("scope", r["theorem"])].append(i)
-            elif r["arm"] == "extreme":
-                out[("extreme", r["direction"])].append(i)
-            else:
-                out[("technique", r["technique"])].append(i)
-        return out
-
-    def unit(v):
-        return v / max(float(np.linalg.norm(v)), 1e-9)
-
-    # The centre cell, identified exactly as stage 1 section 6 does: the
-    # scope records that prove the grid's own theorem.
-    theorem = Counter(r["theorem"] for r in recs
-                      if r["arm"] != "scope").most_common(1)[0][0]
-    centre_key = next((("scope", r["theorem"]) for r in recs
-                       if r["arm"] == "scope" and r["theorem"] == theorem),
-                      None)
-    if centre_key is None:
-        print("  No own-theorem scope cell in this corpus; nothing to compare.")
-        return
-
-    # The grid is the technique and extreme arms. Scope records prove
-    # OTHER statements, so they are not part of the thing whose centre is
-    # being located -- they are only scored against it.
-    grid = [i for i, r in enumerate(recs) if r["arm"] != "scope"]
-    cells = cells_of(recs)
-
-    Xr = X / np.clip(np.linalg.norm(X, axis=1, keepdims=True), 1e-9, None)
-
-    # Not centre_by: that would estimate each language mean from every
-    # record, scope arm included. The means have to come from the balanced
-    # grid, and the scope records then get scored against them.
-    mu = {lang: X[[i for i in grid if recs[i]["language"] == lang]].mean(0)
-          for lang in {r["language"] for r in recs}}
-    Xc = np.stack([X[i] - mu[recs[i]["language"]] for i in range(len(recs))])
-    Xc /= np.clip(np.linalg.norm(Xc, axis=1, keepdims=True), 1e-9, None)
-
-    for name, M in (("raw", Xr), ("language-centred", Xc)):
-        rule(f"{'1' if name == 'raw' else '2'}. Cell centroids vs the grid "
-             f"centroid ({name})")
-        grand = unit(M[grid].mean(0))
-        sims = sorted(((float(grand @ unit(M[i].mean(0))), k)
-                       for k, i in cells.items()), reverse=True)
-        rank = [k for _, k in sims].index(centre_key) + 1
-
-        print(f"\n  centre cell rank {rank} of {len(sims)}")
-        if name == "raw":
-            print("  Raw cosines span a narrow band -- bge-m3's anisotropy, not")
-            print("  a finding. Only the rank is worth reading in this section.")
-
-    print("\n  If the centre cell ranks at or near the top of section 2, the")
-    print("  grid's centre of mass is a real place: the extremal directions")
-    print("  cancel, and what they cancel to is what the model writes when")
-    print("  nothing is asked of it. Where it does NOT rank first, the cells")
-    print("  above it name the imbalance -- the techniques the grid")
-    print("  over-samples relative to the model's default.")
 
 
 # ======================================================================
@@ -999,13 +778,13 @@ def stage_centre(recs, X):
 # classify the other at 1.000. That licenses exactly one thing --
 # classifying the extreme arm, which carries no technique label.
 #
-# Three guards, because a nearest-centroid assignment will always return
-# something: assignment confidence, a permutation null against the
+# there is three checks on the nearest-centroid assignment:
+# assignment confidence, a permutation null against the
 # marginal, and a length-collinearity check.
 #
 # Section 8 runs the same classification on the scope arm, where present.
 # Those records are held out of every estimate here and only classified
-# against the centroids -- Conway and Shipman's scope test, run on the
+# against the centroids and are meant to mimic Conway and Shipman's scope test, run on the
 # model instead of on the literature.
 #
 # Nothing here names a technique, a direction or a theorem: the labels come
@@ -1098,9 +877,6 @@ def stage_extreme(all_recs, X_all):
     rule("0. Does the out-of-sample offset actually remove language?")
     print("  If the technique-arm language means are the language component,")
     print("  a probe on the centred extreme arm should be near chance.")
-    from sklearn.linear_model import LogisticRegression
-    from sklearn.model_selection import cross_val_score
-    from sklearn.preprocessing import LabelEncoder
     yl = LabelEncoder().fit_transform([recs[j]["language"] for j in extr_i])
     raw = np.stack([X[j] for j in extr_i])
     for name, M in (("raw", raw), ("centred", E)):
@@ -1278,6 +1054,47 @@ def stage_extreme(all_recs, X_all):
     print("  subject matter rather than argument.")
 
 
+    # ---------------------------------------------------------------- 9
+    from scipy.optimize import nnls
+
+    def in_hull(P, q, w=1e3):
+        """resid ~ 0 means q is a convex combination of the rows of P."""
+        lam, r = nnls(np.vstack([P.T, w * np.ones(len(P))]),
+                      np.concatenate([q, [w]]))
+        return lam, r / max(float(np.linalg.norm(q - P.mean(0))), 1e-9)
+
+    rule("9. Do the extremal directions surround the default?")
+    grid_theorem = Counter(r["theorem"] for r in recs).most_common(1)[0][0]
+    ck = [k for k, r in enumerate(scope_recs) if r["theorem"] == grid_theorem]
+    if not ck:
+        print("  No own-theorem scope cell; test skipped.")
+        return
+    Q = centre(scope_recs, scope_X, mu, ck)
+    by_dir = [[k for k, j in enumerate(extr_i) if recs[j]["direction"] == d]
+              for d in dirs]
+    P = np.stack([E[ks].mean(0) for ks in by_dir])
+
+    print(f"  {'point':<24}{'resid':>8}")
+    print(f"  {'extreme-arm mean':<24}{in_hull(P, E.mean(0))[1]:>8.3f}"
+          "   <- must be ~0 or the solve is wrong")
+    lam, r0 = in_hull(P, Q.mean(0))
+    print(f"  {'centre cell':<24}{r0:>8.3f}")
+    for t in techs:
+        ks = [k for k, j in enumerate(tech_i) if recs[j]["technique"] == t]
+        print(f"  {'technique: ' + t:<24}{in_hull(P, T[ks].mean(0))[1]:>8.3f}")
+    print("  If every technique also reads ~0, the test has no power.")
+
+    rng = np.random.default_rng(0)
+    boot = [in_hull(np.stack([E[rng.choice(ks, len(ks), True)].mean(0)
+                              for ks in by_dir]),
+                    Q[rng.choice(len(ck), len(ck), True)].mean(0))[1]
+            for _ in range(1000)]
+    print(f"\n  centre cell, 1000 resamples within cells: "
+          f"resid < 0.05 in {np.mean(np.array(boot) < 0.05):.3f}")
+    print(f"  weights: " + "  ".join(f"{d}={l:.2f}"
+                                     for d, l in zip(dirs, lam) if l > 0.01))
+
+
 
 def main():
     """
@@ -1291,9 +1108,8 @@ def main():
     for theorem, corpus in config.CORPORA.items():
         banner(f"CORPUS: {corpus.name}")
 
-        recs, fields = load(corpus)
+        recs = load(corpus)
         X = load_embeddings(cache_for(corpus))
-
 
         # The technique arm is the labelled part -- the only arm that says
         # which known proof each record is -- so it is the slice the
@@ -1320,13 +1136,6 @@ def main():
         #    occupies, whether the factors are separable or merely
         #    orthogonal, how much of the technique signal is vocabulary.
         stage_structure(arm_recs, arm_X)
-
-        # 3b. Stage 1 found the centre cell on the length axis. Now that
-        #     language is known to be removable, ask the same question in
-        #     the embedding: is the centroid of the whole grid -- a point
-        #     no prompt targeted -- the same place as the cell where
-        #     nothing was asked?
-        stage_centre(recs, X)
 
         # 4. The question the corpus was built for: which known argument
         #    does the model reach for when asked for a vertex?
