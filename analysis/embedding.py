@@ -25,7 +25,7 @@ Usage:
     python analysis/embedding.py --corpus generate_proofs/proofs_sqrt2.jsonl
     python analysis/embedding.py --model intfloat/multilingual-e5-large
 
-    # a corpus written by analyse.py's masking stage
+    # a corpus written by ablation.py (stage 5)
     python analysis/embedding.py \\
         --corpus generate_proofs/proofs_primes.masked-discriminative.jsonl
 """

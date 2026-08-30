@@ -103,38 +103,24 @@ analyse.py         every analysis stage, in one run, off the cached
                      1 lengths       integrity, raw and normalised lengths,
                                      direction vs language separation, CJK
                                      × direction interactions, centre cell
-                     2 probes        pooled and leave-one-language-out
-                                     probes, neighbourhood composition,
-                                     the language-centred repeat
+                     2 probes        leave-one-language-out probe on
+                                     technique
                      3 structure     language/style/technique spectra,
                                      subspace angles + nulls, centroid
                                      agreement, hard probes, lexical
                                      baseline, style slices, cross-lingual
-                                     transfer, within-language scores,
-                                     extremal ranking
+                                     transfer, extremal ranking
                      4 extreme       classify the extreme arm against the
                                      technique centroids; assignment
                                      confidence, out-of-set threshold,
                                      direction × technique + permutation
                                      null, the scope test
-                     5 coordinates   the non-lexical second coordinate:
-                                     count of distinct named external
-                                     results invoked, with
-                                     script-independence, length-confound
-                                     and machinery-vs-Fürstenberg tests
-                     6 masking       rewrites the corpus with the
-                                     technique-diagnostic vocabulary
-                                     replaced by a neutral placeholder, so
-                                     the embedding can be asked the same
-                                     questions with the give-away words
-                                     gone. Runs both reported tiers, and
-                                     on the data-driven one sweeps how
-                                     much vocabulary has to go before the
-                                     lexical baseline dies
-                     7 ablation      stage 3's figures recomputed on the
-                                     masked space, beside the unmasked
-                                     ones. Needs the masked corpus embedded
-                                     first; stage 6 prints the command
+                     5 ablation      mask discriminative vocabulary,
+                                     re-embed, and compare cross-lingual
+                                     transfer to the unmasked space
+                                     (primes only; ablation.py)
+ablation.py        stage 5: writes masked corpora, embeds, and prints
+                   unmasked vs masked transfer matrices
 
 WRITEUP.md         the write-up
 
@@ -280,20 +266,21 @@ theorem, and a ∛2 proof is not evidence about how Japanese renders a √2
 proof. Being unfit to estimate from is not the same as being unfit to
 classify, and classifying it is the point:
 
-- `analyse.py` stage 4 §8 — the scope test. Each target is classified against the
+- `analyse.py` stage 4 §9 — the scope test. Each target is classified against the
   technique centroids: which known argument does the model reach for as the
   statement moves out of each proof's documented scope, and do the records
   drift past the out-of-set threshold when it moves out of all of them.
-- `analyse.py` stage 1 §6 — the centre cell against each direction on the
+- `analyse.py` stage 1 §5 — the centre cell against each direction on the
   normalised length scale. A direction is only extreme relative to what the
   model writes unprompted, and that reference point did not exist before.
-- `analyse.py` stage 5 §6 — invoked results per target, testing whether
-  dependence climbs as the statement leaves the light arguments behind.
+- `graphs.py` fig6 — invoked results per target (registry lookup on stage 1
+  lengths), testing whether dependence climbs as the statement leaves the
+  light arguments behind.
 
 Every figure reported above is unaffected by generating any of it, verified
-by diffing all four stages' output before and after, not assumed.
+by diffing all five stages' output before and after, not assumed.
 
-Stage 5 keeps one registry of named results per theorem, chosen
+The registries in lookup_tables.py keep one list of named results per theorem, chosen
 from the corpus's own `theorem` field, and stops rather than falling back
 when it meets a theorem it has no registry for. The √2 and Pythagoras
 registries print a PROVISIONAL banner: they were built from the literature
@@ -334,7 +321,7 @@ inferred from an out-of-set cosine threshold. Reading twelve proofs showed
 only `machinery` does; the rest are out-of-*register*, not out-of-set.
 
 **Held, and it fixes the main error.** A non-lexical second coordinate
-(stage 5): the count of distinct named external results a proof
+(fig6 / registry lookup): the count of distinct named external results a proof
 invokes. It separates the machinery arm from Fürstenberg at accuracy 1.000
 (16.63 against 0.32 invoked results) where the embedding merged them, and it
 survives a length-matched control — the longest 30 technique-arm records are
@@ -348,7 +335,7 @@ on *uncentred* bge-m3 (stage 3 §11): en→zh 0.900, en→ja 0.920, against
 0.62 and 0.50 on the earlier 768-dim encoder. The transfer gap was the
 encoder, not the centring.
 
-**Known failing check.** Stage 4 section 0 tests whether language means
+**Known failing check.** Stage 4 section 1 tests whether language means
 estimated on the technique arm remove language from the extreme arm. They do
 not — the probe sits at 0.487 against chance 0.167. The extreme-arm result
 therefore rests on the mapping being identical across all six languages,
@@ -363,11 +350,11 @@ four points of the encoder. That is consistent with the encoder reading
 arguments *and* with it reading only vocabulary, and section 9 cannot tell
 the two apart.
 
-Stage 6 separates them by taking the vocabulary away. Three results, in
+Stage 5 separates them by taking the vocabulary away. Three results, in
 the order they were found.
 
 **Named machinery is not the give-away.** Masking every entry in the
-stage 5 registry, every mathematician's name in six languages, and
+registry, every mathematician's name in six languages, and
 every technique-diagnostic symbol moves the lexical baseline by *nothing* —
 0.940 before, 0.940 after. Only 1–7 terms per proof are affected and 212 of
 558 records contain no match at all. Whatever identifies a technique, it is
@@ -413,7 +400,7 @@ flagged entry and declines to give a verdict. An earlier version labelled all
 of them "likely false positives", which was wrong for two of the three.
 
 For the machinery tier this matters more on √2 and Pythagoras, whose
-registries stage 5 marks provisional (`VALIDATED` holds only
+registries lookup_tables.py marks provisional (`VALIDATED` holds only
 `infinitude_of_primes`). It matters least where it counts: the headline
 result uses the discriminative tier, which reads no list at all.
 
@@ -431,18 +418,17 @@ vocabulary is more redundant and still sits at 0.433 after 400. That is
 the `TOPK` table at the top of `analyse.py`.
 
 ```bash
-# stage 6 writes the masked corpora; stage 7 skips, and says why
-uv run analysis/analyse.py
+# stage 5 writes the masked corpus, embeds, and prints transfer matrices
+uv run analysis/ablation.py
+```
 
-# embed them, then re-run: stage 7 now has both spaces
-uv run analysis/embedding.py \
-    --corpus generate_proofs/proofs_primes.masked-discriminative.jsonl \
-    --no-figures
+Or as the last step of a full analyse.py run (primes only):
+
+```bash
 uv run analysis/analyse.py
 ```
 
-The second run adds stage 7, which reprints the probes on both spaces
-side by side. The open question it answers: on a corpus where TF-IDF is at
+The open question it answers: on a corpus where TF-IDF is at
 chance, does bge-m3 still recover the technique? If it does, something
 beyond vocabulary is being represented. If it falls with the words, the
 technique geometry in this report is a lexical artefact — and the

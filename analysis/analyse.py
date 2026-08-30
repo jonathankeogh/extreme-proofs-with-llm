@@ -5,17 +5,18 @@ Reads all three corpora and their cached embeddings and prints every analysis st
   Stage 1  lengths        integrity, raw and normalised lengths, direction
                           vs language separation, CJK x direction
                           interactions, the centre cell.   (no embeddings)
-  Stage 2  probes         pooled and leave-one-language-out probes,
-                          neighbourhood composition, the centred repeat.
+  Stage 2  probes         leave-one-language-out probe on technique.
   Stage 3  structure      language/style/technique spectra, subspace angles
                           and their nulls, centroid agreement, hard probes,
                           the lexical baseline, style slices, cross-lingual
-                          transfer, within-language scores, extremal
-                          ranking.
+                          transfer, extremal ranking.
   Stage 4  extreme        the extreme arm classified against the technique
                           centroids: confidence, out-of-set threshold,
                           direction x technique with a permutation null,
                           and the scope test.
+  Stage 5  ablation       mask discriminative vocabulary, re-embed, and
+                          compare cross-lingual transfer to the unmasked
+                          space (primes only; ablation.py).
 """
 
 
@@ -78,8 +79,8 @@ def load_embeddings(cache: Path):
 def stage_lengths(recs):
     banner("STAGE 1: lengths")
 
-    # ---------------------------------------------------------------- 0
-    rule("0. Integrity check")
+    # ---------------------------------------------------------------- 1
+    rule("1. Integrity check")
     ids = [r["id"] for r in recs]
     print(f"records            {len(recs)}")
     print(f"unique ids         {len(set(ids))}")
@@ -102,6 +103,7 @@ def stage_lengths(recs):
     print(f"cells w/ mixed prompt  {len(bad)}" + (f"  {bad}" if bad else ""))
 
     # within (direction, language) how much variation in length do we see in the samples (e.g. n=5)
+    # ---------------------------------------------------------------- 2
     rule("2. Cell medians and within-cell variation")
     d = defaultdict(list)
     for r in recs:
@@ -115,6 +117,7 @@ def stage_lengths(recs):
     print("  higher means real sampling variation")
     print("  Note that 5 samples is a poor estimate of the true variance, this is not a statistical result we are just doing a first pass")
 
+    # ---------------------------------------------------------------- 3
     # Script density affects sequence length, and we do not want that
     # confounded with the underlying proof structure. The effect is
     # multiplicative, so take the log and standardise within language,
@@ -151,7 +154,8 @@ def stage_lengths(recs):
         means[direction] = st.mean(vals)
 
     # Hold direction steady and see how much moves between Latin and CJK.
-    rule("5. CJK vs Latin, per direction (normalised scale)")
+    # ---------------------------------------------------------------- 4
+    rule("4. CJK vs Latin, per direction (normalised scale)")
     print("  A level difference between scripts is already removed by section 3.")
     print("  Anything left here is a language x direction interaction.")
     print(f"\n  {'direction':14} {'latin':>7} {'cjk':>7} {'gap':>7}")
@@ -165,13 +169,13 @@ def stage_lengths(recs):
         print(f"  {direction:14} {st.mean(latin):+7.2f} {st.mean(cjk):+7.2f} "
               f"{gap:+7.2f}{flag}")
 
-    # ---------------------------------------------------------------- 6
+    # ---------------------------------------------------------------- 5
     # Now do calcs relative to the unprompted centre
     theorem = next(r["theorem"] for r in recs if r["arm"] != "scope")
     centre_proofs = [r for r in recs
             if r["arm"] == "scope" and r["theorem"] == theorem]
 
-    rule("6. The centre cell: same theorem, no selection criterion")
+    rule("5. The centre cell: same theorem, no selection criterion")
     z0 = st.mean([r["z"] for r in centre_proofs])
     print(f"  unprompted     n={len(centre_proofs)}   mean z {z0:+.2f}")
     print(f"  {'direction':14} {'mean z':>8} {'vs centre':>11}")
@@ -232,10 +236,10 @@ def stage_probes(recs, X):
     XT = X[idx]
     print(f"\nScoring on the technique arm: {len(T)} labelled records")
 
-    # ---------------------------------------------------------------- 2
+    # ---------------------------------------------------------------- 1
     # Pooled CV cannot separate "technique separates within every language"
     # from "technique separates in English only". This can.
-    print("\n2. Leave-one-language-out probe, target = technique")
+    rule("1. Leave-one-language-out probe, target = technique")
     lolo(XT, [r["technique"] for r in T], [r["language"] for r in T])
 
 
@@ -267,8 +271,7 @@ def stage_probes(recs, X):
 #  10. style_slices        Does technique structure depend on style?
 #  11. cross_lingual       Technique probe trained on one language, applied
 #                          frozen to the rest, on RAW embeddings.
-#  12. within_language     Technique clustering with language held fixed.
-#  13. extremal_ranking    Techniques ranked by centroid distance.
+#  12. extremal_ranking    Techniques ranked by centroid distance.
 # ======================================================================
 
 
@@ -669,7 +672,7 @@ def stage_structure(recs, X):
         print("  -> positive: notation carries the mathematics, prose the "
               "language.")
 
-    # ---------------------------------------------------------------- 13
+    # ---------------------------------------------------------------- 12
 
     def extremal_ranking(X, recs):
         """
@@ -766,7 +769,7 @@ def stage_structure(recs, X):
     rule("11. Cross-lingual transfer, raw embeddings")
     cross_lingual_transfer(X, recs)
 
-    rule("13. Extremal ranking of the techniques")
+    rule("12. Extremal ranking of the techniques")
     extremal_ranking(X, recs)
 
 
@@ -782,7 +785,7 @@ def stage_structure(recs, X):
 # assignment confidence, a permutation null against the
 # marginal, and a length-collinearity check.
 #
-# Section 8 runs the same classification on the scope arm, where present.
+# Section 9 runs the same classification on the scope arm, where present.
 # Those records are held out of every estimate here and only classified
 # against the centroids and are meant to mimic Conway and Shipman's scope test, run on the
 # model instead of on the literature.
@@ -853,7 +856,7 @@ def stage_extreme(all_recs, X_all):
     # proofs of ONE theorem, and a different statement would move them for
     # reasons that have nothing to do with language. But being unfit to
     # estimate from is not the same as being unfit to classify, and
-    # classifying it is the whole point of the arm: section 8 asks which
+    # classifying it is the whole point of the arm: section 9 asks which
     # known argument the model reaches for as the statement moves out of
     # each proof's documented scope.
     keep = [i for i, r in enumerate(all_recs) if r["arm"] != "scope"]
@@ -890,14 +893,14 @@ def stage_extreme(all_recs, X_all):
     else:
         print("  -> offset transferred; language is removed out of sample.")
 
-    # ---------------------------------------------------------------- 1
-    rule("1. Technique centroids, built on the technique arm")
+    # ---------------------------------------------------------------- 2
+    rule("2. Technique centroids, built on the technique arm")
     C = np.stack([T[[k for k, j in enumerate(tech_i)
                      if recs[j]["technique"] == t]].mean(0) for t in techs])
     C /= np.clip(np.linalg.norm(C, axis=1, keepdims=True), 1e-9, None)
 
-    # ---------------------------------------------------------------- 2
-    rule("2. Assignment confidence on the extreme arm")
+    # ---------------------------------------------------------------- 3
+    rule("3. Assignment confidence on the extreme arm")
     S = E @ C.T
     order = np.argsort(-S, axis=1)
     best = order[:, 0]
@@ -914,10 +917,10 @@ def stage_extreme(all_recs, X_all):
     print("  assignment is a coin flip and should not be counted. Table")
     print("  below is reported twice: all records, and margin >= 0.02 only.")
 
-    # ---------------------------------------------------------------- 3
+    # ---------------------------------------------------------------- 4
     for label, keep in (("all records", np.ones(len(E), bool)),
                         ("margin >= 0.02", margin >= 0.02)):
-        rule(f"3. Direction x technique  ({label}, n={keep.sum()})")
+        rule(f"4. Direction x technique  ({label}, n={keep.sum()})")
         tab = np.zeros((len(dirs), len(techs)), int)
         for k, j in enumerate(extr_i):
             if keep[k]:
@@ -941,8 +944,8 @@ def stage_extreme(all_recs, X_all):
         else:
             print("\n  Some row or column is empty; chi2 not computed.")
 
-    # ---------------------------------------------------------------- 4
-    rule("4. Is technique choice just length in disguise?")
+    # ---------------------------------------------------------------- 5
+    rule("5. Is technique choice just length in disguise?")
     print("  If the two coordinates are collinear, you have one axis.")
     L = np.array([len(recs[j]["proof"]) for j in extr_i], float)
     lang = np.array([recs[j]["language"] for j in extr_i])
@@ -956,8 +959,8 @@ def stage_extreme(all_recs, X_all):
         if m.sum():
             print(f"  {t:<18}{m.sum():>4}{z[m].mean():>16.2f}")
 
-    # ---------------------------------------------------------------- 5
-    rule("5. Per-direction detail, for eyeballing")
+    # ---------------------------------------------------------------- 6
+    rule("6. Per-direction detail, for eyeballing")
     for a, d in enumerate(dirs):
         ks = [k for k, j in enumerate(extr_i) if recs[j]["direction"] == d]
         c = Counter(techs[best[k]] for k in ks)
@@ -967,7 +970,8 @@ def stage_extreme(all_recs, X_all):
     print("  cells before believing any of this.")
 
 
-    rule("6. Does the mapping hold within every language?")
+    # ---------------------------------------------------------------- 7
+    rule("7. Does the mapping hold within every language?")
     langs = sorted({recs[j]["language"] for j in extr_i})
     for d in dirs:
         row = []
@@ -982,7 +986,8 @@ def stage_extreme(all_recs, X_all):
     print("  property of the direction, not of residual language leakage.")
 
 
-    rule("7. Out-of-set detection")
+    # ---------------------------------------------------------------- 8
+    rule("8. Out-of-set detection")
     print("  Nearest-centroid must choose one of five. A record whose proof")
     print("  is none of the five still gets assigned. Calibrate: how close")
     print("  is a technique-arm record to its OWN centroid, leave-one-out?")
@@ -1012,7 +1017,8 @@ def stage_extreme(all_recs, X_all):
     if not scope_recs:
         return
 
-    rule("8. The scope test")
+    # ---------------------------------------------------------------- 9
+    rule("9. The scope test")
     print("  Conway and Shipman's criterion for two proofs being really")
     print("  different is that they settle different sets of statements.")
     print("  Each target below sits on a boundary where some of the known")
@@ -1044,7 +1050,7 @@ def stage_extreme(all_recs, X_all):
               f"{out:>4}/{len(ks)}   {share}")
     print(f"\n  cos      mean cosine to the nearest technique centroid")
     print(f"  out      records below the {thr:+.3f} out-of-set threshold "
-          f"from section 7")
+          f"from section 8")
     print(f"  margin over second-best, pooled: mean {margin_s.mean():+.3f}")
     print("\n  Two failure modes to check before reading anything into it.")
     print("  A target where everything lands on one centroid with a tiny")
@@ -1054,7 +1060,7 @@ def stage_extreme(all_recs, X_all):
     print("  subject matter rather than argument.")
 
 
-    # ---------------------------------------------------------------- 9
+    # ---------------------------------------------------------------- 10
     from scipy.optimize import nnls
 
     def in_hull(P, q, w=1e3):
@@ -1063,7 +1069,7 @@ def stage_extreme(all_recs, X_all):
                       np.concatenate([q, [w]]))
         return lam, r / max(float(np.linalg.norm(q - P.mean(0))), 1e-9)
 
-    rule("9. Do the extremal directions surround the default?")
+    rule("10. Do the extremal directions surround the default?")
     grid_theorem = Counter(r["theorem"] for r in recs).most_common(1)[0][0]
     ck = [k for k, r in enumerate(scope_recs) if r["theorem"] == grid_theorem]
     if not ck:
@@ -1113,7 +1119,7 @@ def main():
 
         # The technique arm is the labelled part -- the only arm that says
         # which known proof each record is -- so it is the slice the
-        # instrument is validated on, in stages 3 and 7.
+        # instrument is validated on, in stages 3 and 4.
         arm = [i for i, r in enumerate(recs) if r["arm"] == ARM]
         arm_recs, arm_X = [recs[i] for i in arm], X[arm]
 
@@ -1141,6 +1147,10 @@ def main():
         #    does the model reach for when asked for a vertex?
         stage_extreme(recs, X)
 
+    # final check -> if we perform a masking of the infinitude of primes proofs and re-embed, what
+    # does the analysis say
+    from ablation import infinitude_of_primes_ablation
+    infinitude_of_primes_ablation()
 
 if __name__ == "__main__":
     main()

@@ -1,0 +1,501 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Not All Extremal Directions Are the Same Kind of Thing</title>
+<meta name="description" content="Sampling Conway and Shipman's extreme proofs with a language model: 2,082 proofs of three theorems in six languages, and what an embedding can and cannot see in them.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:ital,opsz,wght@0,6..72,400..700;1,6..72,400..600&family=Source+Serif+4:ital,opsz,wght@0,8..60,400..700;1,8..60,400&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper: #fcfcfb;
+    --paper-2: #f4f3ef;
+    --ink: #141310;
+    --ink-2: #52514e;
+    --muted: #898781;
+    --rule: #e1e0d9;
+    --accent: #2a78d6;
+    --accent-ink: #205ea8;
+    --warm: #eb6834;
+    --warm-ink: #c14e1f;
+    --good-ink: #157a58;
+    --fig-card: transparent;
+    --fig-pad: 0;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper: #161512;
+      --paper-2: #201f1b;
+      --ink: #eae8e1;
+      --ink-2: #b3b0a7;
+      --muted: #85827a;
+      --rule: #33322c;
+      --accent: #6ba3e8;
+      --accent-ink: #8db8ee;
+      --warm: #f0805a;
+      --warm-ink: #f2926f;
+      --good-ink: #4cc79a;
+      --fig-card: #fcfcfb;
+      --fig-pad: 14px;
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper: #161512;
+    --paper-2: #201f1b;
+    --ink: #eae8e1;
+    --ink-2: #b3b0a7;
+    --muted: #85827a;
+    --rule: #33322c;
+    --accent: #6ba3e8;
+    --accent-ink: #8db8ee;
+    --warm: #f0805a;
+    --warm-ink: #f2926f;
+    --good-ink: #4cc79a;
+    --fig-card: #fcfcfb;
+    --fig-pad: 14px;
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--paper);
+    color: var(--ink);
+    font-family: "Source Serif 4", Georgia, "Times New Roman", serif;
+    font-size: 1.075rem;
+    line-height: 1.66;
+    font-optical-sizing: auto;
+  }
+
+  .col { max-width: 41.5rem; margin: 0 auto; padding: 0 1.25rem; }
+  .wide { max-width: 66rem; margin: 0 auto; padding: 0 1.25rem; }
+
+  /* ------------------------------------------------ header */
+  header { padding: 4.5rem 0 2.5rem; }
+  .kicker {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.72rem;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+    color: var(--accent-ink);
+    margin: 0 0 1.4rem;
+  }
+  h1 {
+    font-family: "Newsreader", Georgia, serif;
+    font-optical-sizing: auto;
+    font-weight: 500;
+    font-size: clamp(2.1rem, 5.2vw, 3.4rem);
+    line-height: 1.08;
+    letter-spacing: -0.015em;
+    margin: 0 0 1.1rem;
+    text-wrap: balance;
+  }
+  .dek {
+    font-family: "Newsreader", Georgia, serif;
+    font-style: italic;
+    font-size: 1.28rem;
+    line-height: 1.45;
+    color: var(--ink-2);
+    margin: 0 0 1.6rem;
+    text-wrap: balance;
+  }
+  .byline {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.78rem;
+    color: var(--muted);
+  }
+  .byline a { color: var(--muted); }
+
+  /* ------------------------------------------------ prose */
+  h2 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 500;
+    font-size: 1.9rem;
+    line-height: 1.15;
+    letter-spacing: -0.01em;
+    margin: 3.2rem 0 1rem;
+    text-wrap: balance;
+  }
+  h3 {
+    font-family: "Newsreader", Georgia, serif;
+    font-weight: 600;
+    font-size: 1.28rem;
+    line-height: 1.3;
+    margin: 2.4rem 0 0.7rem;
+    text-wrap: balance;
+  }
+  p { margin: 0 0 1.15rem; }
+  a { color: var(--accent-ink); text-decoration-thickness: 1px; text-underline-offset: 2.5px; }
+  a:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 2px; }
+  strong { font-weight: 600; }
+  ul, ol { margin: 0 0 1.15rem; padding-left: 1.4rem; }
+  li { margin-bottom: 0.45rem; }
+  code {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.83em;
+    background: var(--paper-2);
+    border-radius: 3px;
+    padding: 0.1em 0.35em;
+  }
+  .part {
+    display: flex; align-items: baseline; gap: 1rem;
+    margin: 4.2rem 0 0.4rem;
+    border-top: 1px solid var(--rule);
+    padding-top: 2.2rem;
+  }
+  .part .n {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.75rem; letter-spacing: 0.12em; text-transform: uppercase;
+    color: var(--muted); white-space: nowrap;
+  }
+  .part h2 { margin: 0; }
+
+  /* verdict eyebrows: the article is ordered by what survived */
+  .verdict {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem; font-weight: 600;
+    letter-spacing: 0.14em; text-transform: uppercase;
+    display: inline-block; margin: 2.4rem 0 -1.6rem;
+  }
+  .verdict.held { color: var(--good-ink); }
+  .verdict.died { color: var(--warm-ink); }
+  .verdict.open { color: var(--muted); }
+  .verdict + h3 { margin-top: 2rem; }
+
+  /* ------------------------------------------------ figures */
+  figure { margin: 2.2rem auto; }
+  figure img {
+    display: block; width: 100%; height: auto;
+    background: var(--fig-card);
+    padding: var(--fig-pad);
+    border-radius: 6px;
+  }
+  figcaption {
+    max-width: 41.5rem; margin: 0.8rem auto 0;
+    font-size: 0.88rem; line-height: 1.55; color: var(--ink-2);
+  }
+  figcaption .fig-n {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.1em;
+    text-transform: uppercase; color: var(--muted);
+    margin-right: 0.5em;
+  }
+
+  /* ------------------------------------------------ tables */
+  .tbl-scroll { overflow-x: auto; margin: 1.6rem 0; }
+  table {
+    border-collapse: collapse; margin: 0 auto;
+    font-size: 0.86rem; line-height: 1.4;
+    font-variant-numeric: tabular-nums;
+  }
+  caption {
+    caption-side: top; text-align: left;
+    font-size: 0.8rem; color: var(--muted); padding-bottom: 0.5rem;
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+  }
+  th, td { padding: 0.42rem 0.9rem; text-align: right; }
+  th:first-child, td:first-child { text-align: left; padding-left: 0; }
+  th {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem; font-weight: 500; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--rule);
+  }
+  td { border-bottom: 1px solid var(--rule); color: var(--ink-2); }
+  td.k { color: var(--ink); font-weight: 600; }
+  tr:last-child td { border-bottom: none; }
+
+  /* ------------------------------------------------ asides */
+  .box {
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    background: var(--paper-2);
+    padding: 1.3rem 1.5rem;
+    margin: 2rem 0;
+    font-size: 0.98rem;
+  }
+  .box .label {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 0.68rem; font-weight: 600; letter-spacing: 0.14em;
+    text-transform: uppercase; color: var(--accent-ink);
+    display: block; margin-bottom: 0.6rem;
+  }
+  .box p:last-child { margin-bottom: 0; }
+
+  footer {
+    margin-top: 4.5rem; padding: 2.2rem 0 4rem;
+    border-top: 1px solid var(--rule);
+    font-size: 0.9rem; color: var(--ink-2);
+  }
+
+  @media (max-width: 640px) {
+    header { padding-top: 3rem; }
+    th, td { padding: 0.38rem 0.55rem; }
+  }
+  @media (prefers-reduced-motion: no-preference) {
+    html { scroll-behavior: smooth; }
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="col">
+    <p class="kicker">Proofs as data &middot; 2,082 records &middot; three theorems &middot; six languages</p>
+    <h1>Not all extremal directions are the same kind of thing</h1>
+    <p class="dek">Conway and Shipman imagined the proofs of a theorem as points in a space whose vertices are &ldquo;extreme proofs.&rdquo; I tried to sample that space with a language model and an embedder &mdash; and most of what the embedding seemed to show turned out to be measuring something else.</p>
+    <p class="byline">Jonathan Keogh &middot; August 2026 &middot; <a href="https://github.com/jonathankeogh">code &amp; corpus</a></p>
+  </div>
+</header>
+
+<main>
+<div class="col">
+
+<div class="box">
+  <span class="label">TL;DR</span>
+  <p>I generated 2,082 proofs of three theorems (infinitude of primes, irrationality of &radic;2, Pythagoras) with <code>claude-opus-5</code>: known techniques &times; six languages &times; two styles, plus prompts asking for one extreme at a time &mdash; brevity, generality, heavy machinery &mdash; and embedded everything with bge-m3. The direction prompts reliably select <em>which known argument</em> the model writes (Cram&eacute;r&rsquo;s V 0.53&ndash;0.76, permutation p &lt; 1/20000, identical across all six languages). But the embedding itself mostly measures vocabulary and register, not argument: a bag of words matches it, its &ldquo;orthogonal factor subspaces&rdquo; fail a ten-second permutation null, and its out-of-set detector gives three incompatible answers on three theorems. The two coordinates that survive every control are not embedding coordinates at all: normalised length, and a count of named external results a proof invokes. Masking the discriminative vocabulary and re-embedding &mdash; the experiment the write-up originally left open, run so far on the primes corpus only &mdash; lands in the middle: cross-lingual technique transfer drops from 0.97 to 0.72, and the Latin&harr;CJK block falls to 0.56, but nothing reaches chance (0.20).</p>
+</div>
+
+<h2>The question</h2>
+
+<p>In <em>Extreme Proofs I: The Irrationality of &radic;2</em> (Mathematical Intelligencer, 2013), John Conway and Joseph Shipman propose treating the proofs of a theorem as points in a space whose coordinates are attributes &mdash; brevity, elementarity, generality, visuality, weight of machinery &mdash; and singling out the <em>extreme proofs</em>: the vertices, each one maximising a single attribute. Every other proof worth reading, they suggest, lives in the convex hull of the extremes. They built their space by hand, from six or seven proofs they knew.</p>
+
+<p>The question here is whether that construction can be automated: ask a model that is saturated on proof benchmarks to write proofs under prompts that each maximise one attribute, embed the results with a multilingual encoder, and see whether the geometry Conway and Shipman drew by hand appears in the embedding.</p>
+
+<p>The honest version of the question is narrower, and it is the one this project actually answers: <strong>does a retrieval-trained multilingual encoder separate arguments as well as it separates topics?</strong> An embedder like bge-m3 is trained contrastively on aboutness &mdash; queries land near the passages that answer them. A proof&rsquo;s argument structure might be encoded in that signal. Or it might not, and everything downstream would be measuring wording. The corpus was designed to tell those apart, and the answer, mostly, is the uncomfortable one.</p>
+
+<h2>The corpus</h2>
+
+<p>2,082 proofs across three theorems, generated by <code>claude-opus-5</code> (medium effort, one pinned snapshot throughout) via the Message Batches API. Each record stores its full prompt, model, effort and token usage, so the generation is auditable from the file.</p>
+
+<div class="tbl-scroll">
+<table>
+  <thead><tr><th>theorem</th><th>total</th><th>technique arm</th><th>extreme arm</th><th>scope arm</th></tr></thead>
+  <tbody>
+    <tr><td>infinitude of primes</td><td class="k">648</td><td>300 &nbsp;(5&times;6&times;2&times;5)</td><td>240 &nbsp;(8&times;6&times;5)</td><td>108</td></tr>
+    <tr><td>irrationality of &radic;2</td><td class="k">726</td><td>360 &nbsp;(6&times;6&times;2&times;5)</td><td>240</td><td>126</td></tr>
+    <tr><td>Pythagorean theorem</td><td class="k">708</td><td>360 &nbsp;(6&times;6&times;2&times;5)</td><td>240</td><td>108</td></tr>
+  </tbody>
+</table>
+</div>
+
+<p>Three arms per theorem:</p>
+
+<ul>
+  <li><strong>Technique arm.</strong> Named known proofs (Euclid, Euler product, F&uuml;rstenberg, &hellip;) &times; six languages (en, fr, de, es, zh, ja) &times; two styles (terse, verbose) &times; five samples. Technique is prescribed, so these carry ground-truth labels.</li>
+  <li><strong>Extreme arm.</strong> Eight extremal criteria &times; six languages &times; five samples. No technique is prescribed &mdash; the prompt asks for brevity, or elementarity, or &ldquo;the heaviest machinery you can justify.&rdquo;</li>
+  <li><strong>Scope arm.</strong> Proofs of <em>neighbouring statements</em> (&radic;3, &#8731;2, primes &equiv; 2 mod 5, the law of cosines&hellip;) with no criterion at all. Its first cell is the theorem itself, unprompted &mdash; the interior point every extreme should be extreme <em>relative to</em>.</li>
+</ul>
+
+<p>Chinese and Japanese are load-bearing. A European-only grid lets shared Latin roots give a multilingual embedding an easy ride; several results below are decided in the CJK columns.</p>
+
+</div>
+
+<div class="col">
+<div class="part"><span class="n">Part 1</span><h2>Building the instrument</h2></div>
+
+<p>Before touching the embedding, the crudest possible measurement: character count, log-transformed and z-scored within language (script density is multiplicative &mdash; a Chinese proof of the same content runs about 0.57&times; the length of the English one). Even this blunt ruler shows the design working: direction prompts move length eight to ten times more than the residual language spread within a direction, on all three theorems, and the ordering of directions is the same everywhere.</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig1_lengths.png" alt="Dot plot of normalised proof length by extremal direction for three theorems, with per-language tick marks and a dashed line for the unprompted centre cell." width="2099" height="965">
+  <figcaption><span class="fig-n">Fig 1</span>Direction dominates language on the length axis. The dashed line is the model asked for the theorem with no criterion at all &mdash; on primes and &radic;2 it writes <em>shorter</em> than the grid mean unprompted, so most &ldquo;extremes&rdquo; are lengthenings.</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<h2>What the sphere actually looks like</h2>
+
+<p>The embedding needs one picture before any numbers, because it explains why half the raw cosines in this article should not be read at face value. bge-m3, like most contrastively trained encoders, is anisotropic on a corpus like this: every record is a mathematical proof, so every record shares a topic, so the whole corpus huddles in a cap on the unit sphere. The cosine floor between <em>any</em> two proofs here &mdash; a terse Japanese &radic;2 proof against a verbose German counting argument about primes &mdash; is about 0.29, and the mean pair sits at 0.59.</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig7_sphere.png" alt="Two 3D spheres. Left: all proof embeddings cluster in a cap within 49 degrees of the corpus mean direction, coloured by theorem. Right: after removing per-language means, the cloud forms a belt at 81 to 99 degrees from the same axis." width="2160" height="1316">
+  <figcaption><span class="fig-n">Fig 2</span>The corpus on the unit sphere, projected to the 3-space spanned by the corpus mean direction and the top two principal components; polar angles are exact, computed in the full 1024 dimensions. Left: raw embeddings live in a 49&deg; cap around the mean direction &mdash; shared topic, shared direction. Right: subtracting each language&rsquo;s mean embedding (within theorem) moves the entire cloud onto the belt perpendicular to that axis. Both panels use the frame fitted to the raw cloud, so the right panel is literally what the left one becomes.</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<p class="verdict held">Held</p>
+<h3>Language is additive and removable</h3>
+
+<p>Subtracting each language&rsquo;s mean embedding &mdash; one vector per language, estimated within theorem &mdash; takes the same-technique/cross-language cosine gap from +0.012 (a tie) to +0.361, and drops a language probe from 1.000 to 0.013 while technique classification stays at 1.000. The obvious objection is that in-sample centring guarantees the collapse by construction. It does not: estimated leave-one-out, the numbers are identical to three decimals. And the instrument works out of sample &mdash; a technique probe trained on five languages and tested on the held-out sixth scores 1.000 / 0.992 / 0.997 on the three theorems.</p>
+
+<p>This replicates <a href="https://arxiv.org/abs/2004.05160">Libovick&yacute; et al. 2020</a>, which I found after building it. I had searched the literature along the framing axis &mdash; proof geometry, proof diversity &mdash; and found nothing, which was true but useless; the method axis &mdash; language subspaces in multilingual encoders &mdash; had the answer six years ago. Lesson filed: search the method, not just the framing.</p>
+
+<p class="verdict held">Held</p>
+<h3>Cross-lingual transfer was the encoder, not the centring</h3>
+
+<p>Train the technique probe on English only and apply it frozen to the other five languages, on <em>raw</em>, uncentred embeddings. English and Japanese share no script and no cognate vocabulary, so a direction that separates Euclid from F&uuml;rstenberg in both is not riding on English terms.</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig3_transfer.png" alt="Heatmap of cross-lingual technique transfer accuracy: rows are theorems, columns are target languages, values 0.90 to 1.00." width="1249" height="560">
+  <figcaption><span class="fig-n">Fig 3</span>Technique probe trained on English, applied frozen. Mean 0.96 across all three theorems against chance of 0.17&ndash;0.20. An earlier 768-dimensional encoder managed 0.62 (zh) and 0.50 (ja) &mdash; the transfer gap in the pilot was the encoder&rsquo;s capacity, not the method.</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<p class="verdict died">Did not survive its null</p>
+<h3>The &ldquo;near-orthogonal factor subspaces&rdquo;</h3>
+
+<p>The technique, language and style subspaces look near-orthogonal: minimum principal angle 78.9&deg; between technique and language. That reads like a finding about the design &mdash; independent factors, cleanly separated.</p>
+
+<p>It is not. Permuting the technique labels <em>within each (language, style) cell</em> &mdash; keeping the design intact, destroying only the labels &mdash; gives a null at 77.0&deg;, with p(null &le; observed) = 0.86. In 1024 dimensions almost any two low-rank subspaces are nearly orthogonal. The angle measures the dimensionality, not the design. The null took ten seconds to write and killed the headline.</p>
+
+<p class="verdict died">Did not survive its baseline</p>
+<h3>&ldquo;Technique structure survives translation&rdquo;</h3>
+
+<p>Here is the number that reframed the whole project. Within English only, holding style out (train on terse records, test on verbose, so no grid cell appears on both sides): can TF-IDF alone recover which technique a proof is?</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig4_lexical.png" alt="Grouped bar chart comparing TF-IDF word n-grams, TF-IDF character n-grams and bge-m3 embedding on technique classification accuracy for three theorems." width="2000" height="944">
+  <figcaption><span class="fig-n">Fig 4</span>A bag of words against a 1024-dimensional multilingual encoder, within English, style held out. On primes it comes within four points (0.94 vs 0.98). On &radic;2 it wins outright (1.00 vs 0.93). On Pythagoras, character n-grams win (1.00 vs 0.98). Technique identity is largely lexical.</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<p>That result is consistent with the encoder reading arguments <em>and</em> with it reading only vocabulary &mdash; a proof of Euclid&rsquo;s argument will contain Euclid&rsquo;s words no matter how deeply anything understands it. Separating those two readings needs an intervention, not another correlation.</p>
+
+<h3>Taking the vocabulary away</h3>
+
+<p>So: rewrite the corpus with the give-away terms replaced by a single neutral placeholder, and ask the same questions again. Two ways of choosing what to remove, with opposite results.</p>
+
+<p><strong>Named machinery is not the give-away.</strong> Masking every entry in a hand-built registry of named results, every mathematician&rsquo;s surname in six languages, and every technique-diagnostic symbol moves the lexical baseline by <em>nothing</em>: 1.000 before, 1.000 after. Whatever identifies a technique, it is not the citations.</p>
+
+<p><strong>It is the ordinary descriptive vocabulary, and it is diffuse.</strong> Selecting terms by classifier weight instead (chosen on terse records, tested on verbose, so the selection never sees the test side) produces a slope, not a cliff: it takes roughly 400 masked word types per language before a bag of words hits chance on primes and &radic;2 &mdash; and about 60% of the text is still on the page when it does. The terms doing the work are <code>squarefree</code>, <code>contradicting</code>, <code>distributivity</code>, <code>contrapositive</code> &mdash; ordinary technical prose, not proper nouns.</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig5_masking.png" alt="Line chart of TF-IDF technique accuracy as increasing numbers of high-weight word types are masked, falling to chance around 400 for primes and root 2, remaining at 0.43 for Pythagoras." width="2000" height="1100">
+  <figcaption><span class="fig-n">Fig 5</span>The lexical baseline as vocabulary is removed. No small set of keywords carries the label. Pythagoras is more redundant &mdash; still at 0.47 after 400 types &mdash; and would need a deeper cut before its lexical baseline dies.</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<p>One check on the masking itself: every masked term becomes the same placeholder, so the corpus does not record which term was removed, and classifying technique from what a reader of the masked text <em>can</em> see &mdash; placeholder count, length, density &mdash; sits exactly at chance. An earlier version of this check reported a leak of 0.90; it was classifying from its own mask log rather than from the proofs. The distinction between &ldquo;the mask leaks&rdquo; and &ldquo;the check reads its own bookkeeping&rdquo; cost an afternoon and was worth it.</p>
+
+<p class="verdict open">The open question, measured once</p>
+<h3>Does the encoder survive where the bag of words died?</h3>
+
+<p>This was the experiment the first version of this write-up flagged as not yet run: embed the masked corpus &mdash; the one on which TF-IDF is at chance &mdash; and ask whether bge-m3 still recovers the technique across languages. If it holds, something beyond the masked vocabulary is represented. If it falls to chance with the words, every technique result above is a lexical artefact and Figure 3 was proper-noun alignment.</p>
+
+<p>The answer is genuinely in the middle, and more informative than either clean outcome. One honest framing note before the figure: this is a single experiment &mdash; one theorem (primes), one masked tier (400 word types per language), embedded once. The three-theorem replication that backs every other figure in this article does not yet back this one.</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig8_masked_transfer.png" alt="Two six-by-six heatmaps of cross-lingual technique transfer between all language pairs, before and after masking, with the Latin-to-CJK blocks outlined; masked values drop most in those blocks." width="1929" height="893">
+  <figcaption><span class="fig-n">Fig 6</span>Cross-lingual technique transfer on primes, all 30 train&rarr;test language pairs, before and after masking 400 word types per language. Mean falls 0.967 &rarr; 0.722; the Latin&harr;CJK blocks (dashed) fall 0.94 &rarr; 0.56; the worst single pair (fr&rarr;zh) falls to 0.38. Chance is 0.20. Note ja&harr;zh: 0.96&ndash;0.98 <em>after</em> masking.</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<p>Three things follow. First, the technique geometry is not purely lexical: on a corpus where a bag of words is at chance, every one of the thirty transfer directions stays above it, most by a wide margin, and within the Latin family transfer barely moves (es&rarr;de still 0.96). Second, a large share of the <em>cross-script</em> transfer in Figure 3 was riding on exactly the vocabulary the mask removed &mdash; the Latin&harr;CJK block drops by 0.38, and French&rarr;Chinese collapses to 0.38. The claim &ldquo;the encoder represents arguments language-independently&rdquo; has to be weakened to &ldquo;the encoder represents something beyond the top-400 discriminative word types, but its cross-script alignment leans on shared technical vocabulary.&rdquo; Third, the one masked cell that stays near-perfect is Japanese&harr;Chinese (0.96&ndash;0.98): the two languages that share han characters keep their alignment after the per-language masks, which is exactly where a vocabulary-bridge account predicts the survival.</p>
+</div>
+
+<div class="col">
+<div class="part"><span class="n">Part 2</span><h2>Sampling the vertices</h2></div>
+
+<p class="verdict held">Held, on all three theorems</p>
+<h3>Each extremal direction selects a known argument</h3>
+
+<p>The extreme arm carries no technique label &mdash; the prompt asks for a property, not a proof. Classify each record against the technique-arm centroids and ask: does the direction prompt change which known argument the model reaches for?</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig2_direction_technique.png" alt="Three heatmaps, one per theorem, of extremal direction against assigned technique, showing strong concentrated mappings such as brevity to Euclid and machinery to inner product." width="2549" height="816">
+  <figcaption><span class="fig-n">Fig 7</span>Direction &times; assigned technique, counts of 30 (six languages &times; five samples). Cram&eacute;r&rsquo;s V 0.76 / 0.52 / 0.62; a 20,000-shuffle permutation null over direction labels never comes close (observed &chi;&sup2; 560 on primes against a null mean of 28 and null <em>maximum</em> of 74).</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<p>The mapping is essentially identical in all six languages &mdash; on primes, four of eight directions select the same technique 5/5 in every language &mdash; which is what makes it a property of the direction rather than residual language leakage. And the mapping itself is where the theorems diverge, which is the result the title is about:</p>
+
+<ul>
+  <li><strong>Primes:</strong> four different directions &mdash; brevity, elementarity, nonvisuality, constructiveness &mdash; all collapse onto Euclid (30/30, 30/30, 30/30, 23/30). Generality selects the Euler product 30/30; surprise selects F&uuml;rstenberg 28/30.</li>
+  <li><strong>&radic;2:</strong> much flatter. Visuality, the axis that died on primes for want of more than one visual proof, was predicted in advance to split here between the two geometric arguments the article itself distinguishes &mdash; and it does: covering 16/30, folding 14/30.</li>
+  <li><strong>Pythagoras:</strong> the sharpest mapping, and the cleanest demonstration that these are not independent coordinates: <em>machinery</em> and <em>nonvisuality</em> both land on the inner-product proof 30/30. On this theorem, &ldquo;use the heaviest machinery&rdquo; and &ldquo;avoid all pictures&rdquo; are the same instruction.</li>
+</ul>
+
+<p class="verdict died">Misleading, caught by replication</p>
+<h3>The out-of-set threshold measures register, not scope</h3>
+
+<p>Nearest-centroid must return something, so the analysis calibrates an out-of-set threshold: the 5th percentile of technique-arm records&rsquo; cosine to their own centroid, leave-one-out. On primes this reads as though six of eight directions leave the known set of arguments entirely. That would have been the headline &mdash; the model inventing off-hull proofs on demand.</p>
+
+<p>The other two theorems kill it. On &radic;2, <em>everything</em> is out-of-set by this measure, including brevity, which on primes was 0/30. On Pythagoras almost nothing is. The same measurement on three corpora built the same way gives three incompatible pictures &mdash; and reading twelve of the flagged primes proofs by hand had already shown what it actually detects: a formal, hedged, encyclopedic register that moves a record in embedding space without changing its mathematics. Only <code>machinery</code> genuinely leaves the reference set.</p>
+
+<p class="verdict held">Held</p>
+<h3>The scope test tracks the mathematics</h3>
+
+<p>The scope arm asks for proofs of neighbouring statements and classifies them against the centroids, which none of them touched during estimation. Where the mathematics forces a change of argument, the model changes argument: for primes &equiv; 2 mod 5 &mdash; where Murty&rsquo;s 1988 result says no Euclidean proof exists &mdash; the records land on the Euler-product centroid 15/18, while for primes &equiv; 3 mod 4, where Euclid&rsquo;s argument adapts directly, they stay Euclid 17/18. And the two scope targets that are secretly the same statement as a known technique &mdash; the parallelogram law and the inner-product form of Pythagoras &mdash; are the only scope targets anywhere that land <em>inside</em> the reference set, both 18/18 on the inner-product centroid at cosine 0.63.</p>
+
+<p>One known failing check, stated rather than patched: language means estimated on the technique arm do not fully remove language from the extreme arm (a language probe on the centred extreme arm sits at 0.43 against chance 0.17 on primes). The extreme-arm result therefore rests on the per-language replication in Figure 7&rsquo;s mapping, not on clean out-of-sample language removal.</p>
+</div>
+
+<div class="col">
+<div class="part"><span class="n">Part 3</span><h2>A coordinate that is not wording</h2></div>
+
+<p>Everything above measures a proof by where its wording lands, and that produced the project&rsquo;s central error. The embedding assigned 22/30 machinery records to the F&uuml;rstenberg centroid &mdash; because F&uuml;rstenberg&rsquo;s proof has the most abstract <em>vocabulary</em> in the reference set, while its mathematics is Euclid&rsquo;s argument in topological dress, invoking no external theorem at all. A similarity measure cannot tell &ldquo;uses abstract terminology&rdquo; from &ldquo;uses powerful theorems.&rdquo;</p>
+
+<p>So count the second thing directly: the number of distinct named external results a proof invokes, matched from a registry in all six languages.</p>
+</div>
+
+<div class="wide">
+<figure>
+  <img src="figures/fig6_coordinates.png" alt="Scatter plot of extremal directions on two axes: normalised length and number of named results invoked on a log scale. Machinery sits alone at 16.6 invoked results; Furstenberg's own proofs sit near zero." width="2000" height="1257">
+  <figcaption><span class="fig-n">Fig 8</span>The two coordinates that survive every control, primes corpus. <code>machinery</code> invokes 16.6 distinct named results on average; F&uuml;rstenberg &mdash; where the embedding filed those records &mdash; invokes 0.3. A single threshold (&ge;2 invoked results) separates them at accuracy 1.000 where the embedding cosine managed 0.13.</figcaption>
+</figure>
+</div>
+
+<div class="col">
+<p>The control that matters is length: quoting theorems takes words, and the count correlates with length at Spearman +0.59. So compare machinery against the <em>longest</em> 30 technique-arm records instead of all of them: those are longer than the machinery proofs (length z +1.45 vs +0.91) and invoke 1.40 results against machinery&rsquo;s 16.63. At equal or greater length, a twelfth of the dependence. It is not length wearing a hat. The measure is also script-independent &mdash; median CJK/Latin ratio 0.84 &mdash; which is not obvious for a name-matching instrument.</p>
+
+<p>The honest limitation: this coordinate has almost no resolution outside the one distinction it was built to make. Seven of eight directions sit at 0.00&ndash;0.13 invoked results. It decisively separates heavy machinery from abstract vocabulary, and orders nothing else.</p>
+
+<p>Where that leaves the geometry: <code>brevity</code> and <code>elementarity</code> separate on length and coincide at zero dependence &mdash; the same argument at different lengths, which is what reading the proofs suggests. <code>constructiveness</code> and <code>generality</code> sit at nearly the same length and are 10&times; apart in dependence. Two coordinates that mean something is the minimum for Conway and Shipman&rsquo;s geometric framing to be worth taking literally. On this evidence it is also the maximum: the extremal directions are not axes of one space. Three of them select among known arguments, one leaves the known set entirely, and one only re-renders an argument you already had.</p>
+
+<h2>What I got wrong</h2>
+
+<p>Four things, each caught by a check that took under a minute to write:</p>
+
+<ol>
+  <li><strong>Near-orthogonal subspaces</strong> as a claim about the design &mdash; the permuted null sits at the same angle (p = 0.86). It measures the dimension.</li>
+  <li><strong>&ldquo;Technique structure survives translation&rdquo;</strong> as a claim about argument structure &mdash; a bag of words matches the encoder within English, and the masking ablation shows the cross-script part of the transfer leaning on vocabulary.</li>
+  <li><strong>&ldquo;Most directions leave the reference set&rdquo;</strong> &mdash; the threshold measures register; the three-theorem comparison makes that quantitative.</li>
+  <li><strong>The machinery/F&uuml;rstenberg conflation</strong> &mdash; the embedding merged the arm with the heaviest tools into the technique with the most abstract words. Only a non-lexical coordinate separates them.</li>
+</ol>
+
+<p>The nulls and baselines are the point of the project as much as the findings are. Each one cost seconds and each one killed a headline I would otherwise have shipped.</p>
+
+<h2>Limitations</h2>
+
+<ul>
+  <li><strong>The clouds interpenetrate.</strong> Within-technique spread is as large as between-centroid distance for all but the top technique on each theorem. The analysis ranks centroids; it fits no hull.</li>
+  <li><strong>One generator, one encoder.</strong> Everything here is a fact about <code>claude-opus-5</code>&rsquo;s organisation of proof-writing as seen by <code>bge-m3</code>, not a fact about proofs. The replication across three theorems does not replicate across models.</li>
+  <li><strong>Proof correctness is unverified</strong> beyond twelve records read by hand. On Pythagoras this is live: the famous circular proof derives the theorem from sin&sup2;+cos&sup2;=1, which <em>is</em> the theorem, and nothing in the pipeline would notice.</li>
+  <li><strong>Two direction prompts had to be adapted across theorems</strong> (elementarity, constructiveness), so five of the eight directions are comparable across all three theorems, one across two, one not at all.</li>
+  <li><strong>Registry coverage.</strong> The &radic;2 and Pythagoras registries were built from the literature rather than validated against their corpora, and the code prints a PROVISIONAL banner for them. The scale of the risk if a registry is wrong: the &radic;2 registry run against the primes corpus reports 0.85 invoked results where the right one reports 16.63 &mdash; a recall failure that reads exactly like a null result.</li>
+</ul>
+
+<h2>What would come next</h2>
+
+<p>A second generator is now the single point of failure: the interesting claim &mdash; that the extremal directions decompose the same way regardless of what is being proved &mdash; has three theorems behind it and one model. Everything after generation runs on cached files in about two minutes, so the cost is one batch job. Beyond that: derive the &radic;2 and Pythagoras registries from their corpora the way the primes one was, and push the masking ablation to the other two theorems &mdash; the Latin&harr;CJK collapse in Figure 6 is one corpus&rsquo;s answer and deserves its own replication.</p>
+
+<footer>
+  <p>Corpus, embeddings, and every analysis stage (including the nulls that killed the headlines) are in the repository; the analysis runs end-to-end on a laptop in about two minutes off the cached embeddings. Conway &amp; Shipman, <em>Extreme Proofs I: The Irrationality of &radic;2</em>, Math. Intelligencer 35(3), 2013.</p>
+</footer>
+
+</div>
+</main>
+</body>
+</html>

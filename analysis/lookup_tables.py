@@ -2,19 +2,19 @@
 The lookup tables: data the analysis reads, and nothing else.
 
 Five hundred lines of surface forms with no logic in them, kept out of
-analyse.py so that file reads as seven stages rather than as seven stages
+analyse.py so that file reads as five stages rather than as five stages
 wrapped around a wall of regexes.
 
-  PROOF_MARKERS            "Proof."/"Beweis"/"証明" in six languages. Stage
-                           5 uses it, and only for the cited-but-not-proved
+  PROOF_MARKERS            "Proof."/"Beweis"/"証明" in six languages. Used
+                           by graphs.py for the cited-but-not-proved
                            refinement.
-  *_REGISTRY, REGISTRIES   Stage 5's named external results, one list per
-                           theorem, keyed by the corpus's own `theorem`
-                           field. The coordinate transfers between
+  *_REGISTRY, REGISTRIES   Named external results, one list per theorem,
+                           keyed by the corpus's own `theorem` field. Used
+                           by graphs.py fig6; the coordinate transfers between
                            theorems; the registry cannot, because what
                            counts as an invoked result depends on what the
                            proofs cite.
-  NAMES, NOTATION          Stage 6's masking tables: mathematicians'
+  NAMES, NOTATION          Stage 5's masking tables: mathematicians'
                            surnames, and technique-diagnostic symbols.
 
 Each entry is (canonical_name, [surface forms]). A form beginning with
@@ -456,7 +456,7 @@ REGISTRIES = {
     "irrationality_of_sqrt2": SQRT2_REGISTRY,
     "pythagorean_theorem": PYTHAGORAS_REGISTRY,
 }
-# Mathematicians' names. The stage 5 registries carry these only
+# Mathematicians' names. The registries carry these only
 # inside longer phrases ("Euclid's lemma", "Fermat numbers"), because their
 # job is to count invoked machinery. A bare surname is not machinery, but it
 # is exactly the kind of token that gives a technique away, so it needs its

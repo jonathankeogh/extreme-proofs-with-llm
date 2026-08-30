@@ -3,23 +3,24 @@ Publication figures for the write-up, drawn from the same data analyse.py
 reads: the three corpora and their cached bge-m3 embeddings. Nothing here
 embeds anything, and nothing here invents a number -- every figure is
 recomputed with the same method as the analyse.py stage it illustrates,
-except the masking sweep, whose values are transcribed from stage 6's
+except the masking sweep, whose values are transcribed from stage 5's
 printed table (recomputing it would mean duplicating the entire masking
 pipeline; the numbers are the ones the write-up quotes).
 
-    fig1_lengths.png        stage 1: normalised length by direction, with
+    fig1_lengths.png        stage 1 s3–s5: normalised length by direction, with
                             the unprompted centre cell as the origin
     fig2_direction_technique.png
-                            stage 4: which known argument each extremal
+                            stage 4 s4: which known argument each extremal
                             direction selects, per theorem
     fig3_transfer.png       stage 3 s11: cross-lingual technique transfer
                             on raw embeddings, en -> the other five
     fig4_lexical.png        stage 3 s9: a bag of words against the encoder,
                             within English, style held out
-    fig5_masking.png        stage 6: the lexical baseline as vocabulary is
-                            removed (values from the stage 6 run)
-    fig6_coordinates.png    stage 5: the two coordinates that survive --
-                            normalised length x named results invoked
+    fig5_masking.png        stage 5: the lexical baseline as vocabulary is
+                            removed (values from the stage 5 run)
+    fig6_coordinates.png    stage 1 length x registry lookup: the two
+                            coordinates that survive -- normalised length
+                            and named results invoked
     fig7_sphere.png         the anisotropy picture: the whole corpus is a
                             cap on the unit sphere, and what centring does
                             to it
@@ -364,18 +365,40 @@ def fig_lexical(data):
 
 
 # ================================================================= fig 5
-def fig_masking():
+def fig_masking(data):
     """
-    Stage 6's discriminative sweep: TF-IDF accuracy as the top-k
-    highest-weight word types are masked. Values transcribed from the
-    stage 6 run (the write-up's table); recomputing them here would
-    duplicate the masking pipeline.
+    The discriminative masking sweep, recomputed from the corpora with
+    stage 5's own selection and masking (ablation.py): terms chosen by
+    classifier weight on terse English records, the corpus masked, and
+    TF-IDF scored train-terse / test-verbose within English.
     """
+    from ablation import PLACEHOLDER, discriminative_terms, mask_text
+
     ks = (0, 10, 50, 100, 400)
-    sweep = {"primes": (0.960, 0.800, 0.600, 0.400, 0.200),
-             "sqrt2": (1.000, 0.967, 0.667, 0.433, 0.167),
-             "pythagoras": (0.833, 0.767, 0.833, 0.767, 0.433)}
-    chance = {"primes": 0.200, "sqrt2": 0.167, "pythagoras": 0.167}
+    sweep, kept = {}, {}
+    for t in THEOREMS:
+        recs, _ = data[t]
+        en = [r for r in recs
+              if r["arm"] == "technique" and r["language"] == "en"]
+        y = LabelEncoder().fit_transform([r["technique"] for r in en])
+        tr = [i for i, r in enumerate(en) if r["style"] == "terse"]
+        te = [i for i, r in enumerate(en) if r["style"] == "verbose"]
+        row = []
+        for k in ks:
+            terms = discriminative_terms(recs, "en", k) if k else []
+            txt = [mask_text(r["proof"], terms, "en") for r in en]
+            pipe = make_pipeline(
+                TfidfVectorizer(min_df=2, analyzer="word",
+                                ngram_range=(1, 2)),
+                LogisticRegression(max_iter=3000))
+            pipe.fit([txt[i] for i in tr], y[tr])
+            row.append(pipe.score([txt[i] for i in te], y[te]))
+        sweep[t] = tuple(row)
+        kept[t] = (sum(len(s.replace(PLACEHOLDER, "")) for s in txt)
+                   / sum(len(r["proof"]) for r in en))
+        print(f"  masking sweep {t}: "
+              + "  ".join(f"{a:.3f}" for a in sweep[t])
+              + f"   text kept at {ks[-1]}: {kept[t]:.2f}")
 
     fig, ax = plt.subplots(figsize=(7.2, 4.0))
     xs = np.arange(len(ks))
@@ -399,18 +422,85 @@ def fig_masking():
     ax.set_ylabel("TF-IDF technique accuracy")
     ax.set_title("No small set of keywords carries the technique label",
                  loc="left", fontsize=11, fontweight="bold", pad=26)
+    lo, hi = min(kept.values()), max(kept.values())
     ax.text(0, 1.03, "a slope, not a cliff: ~400 word types before a bag "
-            "of words hits chance, with 86% of the text still on the page",
+            "of words is at or near chance, with "
+            f"{lo:.0%}–{hi:.0%} of the English text still on the page",
             transform=ax.transAxes, fontsize=9, color=INK2, va="bottom")
     fig.tight_layout()
     fig.savefig(OUT / "fig5_masking.png", bbox_inches="tight")
     plt.close(fig)
 
 
+# ================================================================= fig 8
+def fig_masked_transfer():
+    """
+    Stage 5's answer to the open question: cross-lingual technique
+    transfer on the primes corpus, before and after masking the 400
+    highest-weight word types per language -- the corpus on which the
+    TF-IDF baseline is at chance. Values transcribed from the stage 5
+    run, like fig5 (recomputing them would duplicate the pipeline).
+    """
+    langs = ("de", "en", "es", "fr", "ja", "zh")
+    unmasked = np.array([
+        [np.nan, 1.000, 1.000, 1.000, 1.000, 1.000],
+        [1.000, np.nan, 1.000, 0.980, 0.920, 0.900],
+        [1.000, 1.000, np.nan, 0.980, 0.960, 0.980],
+        [1.000, 1.000, 1.000, np.nan, 0.920, 0.900],
+        [1.000, 0.960, 1.000, 0.880, np.nan, 1.000],
+        [0.940, 0.900, 0.960, 0.840, 1.000, np.nan]])
+    masked = np.array([
+        [np.nan, 0.860, 0.820, 0.720, 0.500, 0.540],
+        [0.880, np.nan, 0.920, 0.900, 0.680, 0.720],
+        [0.960, 0.960, np.nan, 0.940, 0.700, 0.820],
+        [0.960, 0.900, 0.960, np.nan, 0.400, 0.380],
+        [0.640, 0.560, 0.580, 0.580, np.nan, 0.960],
+        [0.400, 0.500, 0.460, 0.480, 0.980, np.nan]])
+
+    fig, axes = plt.subplots(1, 2, figsize=(7.6, 4.1),
+                             gridspec_kw={"wspace": 0.08})
+    for ax, M, head, mu in ((axes[0], unmasked, "unmasked", 0.967),
+                            (axes[1], masked, "masked (400 word types "
+                             "per language)", 0.722)):
+        ax.imshow(np.ma.masked_invalid(M), cmap=BLUES, vmin=0.2, vmax=1.0)
+        for a in range(6):
+            for b in range(6):
+                if a == b:
+                    continue
+                ax.text(b, a, f"{M[a, b]:.2f}".lstrip("0"), ha="center",
+                        va="center", fontsize=8,
+                        color="#ffffff" if M[a, b] > 0.75 else INK)
+        # the CJK block: the corner masking hits hardest
+        for x0, y0 in ((3.5, -0.5), (-0.5, 3.5)):
+            ax.add_patch(mpl.patches.Rectangle(
+                (x0, y0), 2 if x0 > 0 else 4, 2 if y0 > 0 else 4,
+                fill=False, edgecolor=S2, lw=1.4,
+                linestyle=(0, (3, 2)), clip_on=False))
+        ax.set_xticks(range(6), langs)
+        ax.set_yticks(range(6), langs if ax is axes[0] else [])
+        ax.tick_params(length=0)
+        despine(ax, keep=())
+        ax.set_title(f"{head}\nmean {mu:.3f}", fontsize=9.5)
+        ax.set_xlabel("technique probe applied to…")
+    axes[0].set_ylabel("trained on")
+    axes[0].text(0, 1.30, "With the give-away vocabulary gone, transfer "
+                 "drops but does not die", transform=axes[0].transAxes,
+                 fontsize=12, fontweight="bold", va="bottom")
+    axes[0].text(0, 1.19, "infinitude of primes, bge-m3 · dashed: the "
+                 "Latin/CJK blocks, 0.94 to 0.56 · chance 0.20 · the "
+                 "same masked corpus puts TF-IDF at chance",
+                 transform=axes[0].transAxes, fontsize=9, color=INK2,
+                 va="bottom")
+    fig.tight_layout()
+    fig.savefig(OUT / "fig8_masked_transfer.png", bbox_inches="tight")
+    plt.close(fig)
+
+
 # ================================================================= fig 6
 def fig_coordinates(data):
     """
-    Stage 5 on primes: the two coordinates that mean something. x = mean
+    Stage 1 length x registry lookup on primes: the two coordinates that
+    mean something. x = mean
     normalised length, y = mean distinct named results invoked, one point
     per direction; Furstenberg's technique-arm records as the reference
     the embedding confused machinery with.
@@ -702,7 +792,7 @@ def fig_sphere(data):
                  "(cos {lo:.2f}) · mean pair cos {mu:.2f}"),
         dict(A=np.vstack(cent), from_pole=False,
              head="per-language mean removed, within theorem",
-             sub="a belt at {near:.0f}–{far_ax:.0f}° from the same axis"
+             sub="a belt at {near:.0f}–{far_ax:.0f}° from the same axis\n"
                  "furthest pair: {far:.0f}° (cos {lo:.2f}) · "
                  "mean pair cos {mu:.2f}"),
     )
@@ -762,7 +852,8 @@ def main():
     fig_direction_technique(data)
     fig_transfer(data)
     fig_lexical(data)
-    fig_masking()
+    fig_masking(data)
+    fig_masked_transfer()
     fig_coordinates(data)
     fig_sphere(data)
     for p in sorted(OUT.glob("fig*.png")):

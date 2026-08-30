@@ -168,32 +168,31 @@ def transfer_matrix(X, recs, label="technique"):
                 chance=1 / len(le.classes_))
 
 
-def main():
-    for theorem, corpus in config.CORPORA.items():
-        print(f"\n{'=' * 72}\n{corpus.name}\n{'=' * 72}")
+def infinitude_of_primes_ablation():
+    corpus = config.CORPORA["infinitude_of_primes"]
 
-        recs = [json.loads(l) for l in corpus.open() if l.strip()]
-        fields = set().union(*(r.keys() for r in recs))
-        T = [r for r in recs if r["arm"] == "technique"]
-        keep = [i for i, r in enumerate(recs) if r["arm"] == "technique"]
+    recs = [json.loads(l) for l in corpus.open() if l.strip()]
+    fields = set().union(*(r.keys() for r in recs))
+    T = [r for r in recs if r["arm"] == "technique"]
+    keep = [i for i, r in enumerate(recs) if r["arm"] == "technique"]
 
-        print("\nmasking")
-        masked_corpus = write_masked(recs, fields, corpus)
-        embed(masked_corpus)
+    print("\nmasking")
+    masked_corpus = write_masked(recs, fields, corpus)
+    embed(masked_corpus)
 
-        X = np.load(cache_for(corpus))[keep]
-        Xm = np.load(cache_for(masked_corpus))[keep]
+    X = np.load(cache_for(corpus))[keep]
+    Xm = np.load(cache_for(masked_corpus))[keep]
 
-        print("\nunmasked")
-        u = transfer_matrix(X, T)
-        print("\nmasked")
-        m = transfer_matrix(Xm, T)
+    print("\nunmasked")
+    u = transfer_matrix(X, T)
+    print("\nmasked")
+    m = transfer_matrix(Xm, T)
 
-        print(f"\n  {'':<16}{'unmasked':>10}{'masked':>10}{'drop':>8}")
-        for k in ("mean", "cjk", "worst"):
-            print(f"  {k:<16}{u[k]:10.3f}{m[k]:10.3f}{u[k] - m[k]:+8.3f}")
-        print(f"  {'chance':<16}{u['chance']:10.3f}")
+    print(f"\n  {'':<16}{'unmasked':>10}{'masked':>10}{'drop':>8}")
+    for k in ("mean", "cjk", "worst"):
+        print(f"  {k:<16}{u[k]:10.3f}{m[k]:10.3f}{u[k] - m[k]:+8.3f}")
+    print(f"  {'chance':<16}{u['chance']:10.3f}")
 
 
 if __name__ == "__main__":
-    main()
+    infinitude_of_primes_ablation()
