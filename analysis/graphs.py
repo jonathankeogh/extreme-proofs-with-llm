@@ -284,10 +284,8 @@ def fig_transfer(data):
     ax.set_yticks(range(len(THEOREMS)), [TITLES[t] for t in THEOREMS])
     ax.tick_params(length=0)
     despine(ax, keep=())
-    ax.set_xlabel("technique probe trained on English, applied frozen to…")
-    ax.set_title("Cross-lingual technique transfer on raw embeddings\n"
-                 "chance 0.17–0.20 · an earlier 768-d encoder managed "
-                 "0.62 (zh), 0.50 (ja)",
+    ax.set_xlabel("technique probe trained on English, applied to…")
+    ax.set_title("Cross-lingual technique transfer on raw embeddings",
                  fontsize=9.5, loc="left")
     fig.tight_layout()
     fig.savefig(OUT / "fig3_transfer.png", bbox_inches="tight")
@@ -352,12 +350,11 @@ def fig_lexical(data):
     ax.set_yticks((0, 0.25, 0.5, 0.75, 1.0))
     ax.grid(axis="y", zorder=0)
     despine(ax, keep=("bottom",))
-    ax.set_ylabel("technique accuracy, English only\n"
-                  "(train on one style, test on the other)")
+    ax.set_ylabel("technique accuracy, English only")
     ax.legend(loc="lower left", bbox_to_anchor=(0, 1.0), ncols=3,
               columnspacing=1.4, handlelength=1.2)
-    ax.set_title("A bag of words nearly matches the encoder — and on "
-                 "√2 beats it", loc="left", fontsize=11,
+    ax.set_title("A bag of words nearly matches the encoder",
+                 loc="left", fontsize=11,
                  fontweight="bold", pad=32)
     fig.tight_layout()
     fig.savefig(OUT / "fig4_lexical.png", bbox_inches="tight")
@@ -422,11 +419,6 @@ def fig_masking(data):
     ax.set_ylabel("TF-IDF technique accuracy")
     ax.set_title("No small set of keywords carries the technique label",
                  loc="left", fontsize=11, fontweight="bold", pad=26)
-    lo, hi = min(kept.values()), max(kept.values())
-    ax.text(0, 1.03, "a slope, not a cliff: ~400 word types before a bag "
-            "of words is at or near chance, with "
-            f"{lo:.0%}–{hi:.0%} of the English text still on the page",
-            transform=ax.transAxes, fontsize=9, color=INK2, va="bottom")
     fig.tight_layout()
     fig.savefig(OUT / "fig5_masking.png", bbox_inches="tight")
     plt.close(fig)
@@ -483,14 +475,9 @@ def fig_masked_transfer():
         ax.set_title(f"{head}\nmean {mu:.3f}", fontsize=9.5)
         ax.set_xlabel("technique probe applied to…")
     axes[0].set_ylabel("trained on")
-    axes[0].text(0, 1.30, "With the give-away vocabulary gone, transfer "
-                 "drops but does not die", transform=axes[0].transAxes,
+    axes[0].text(0, 1.30, "Infinitude of primes technique probe between "
+                 "masked and unmasked embeds", transform=axes[0].transAxes,
                  fontsize=12, fontweight="bold", va="bottom")
-    axes[0].text(0, 1.19, "infinitude of primes, bge-m3 · dashed: the "
-                 "Latin/CJK blocks, 0.94 to 0.56 · chance 0.20 · the "
-                 "same masked corpus puts TF-IDF at chance",
-                 transform=axes[0].transAxes, fontsize=9, color=INK2,
-                 va="bottom")
     fig.tight_layout()
     fig.savefig(OUT / "fig8_masked_transfer.png", bbox_inches="tight")
     plt.close(fig)
